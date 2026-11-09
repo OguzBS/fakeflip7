@@ -456,9 +456,14 @@
         window.location.hash = `room=${currentRoomCode}`;
 
         const roomRef = getRoomRef(currentRoomCode);
+
+        // Add a 5-second timeout notice in case Realtime Database is unresponsive or blocked
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Connection timed out. Check your ad-blocker or Realtime DB location URL.")), 5000)
+        );
         
         // Fetch snapshot once to create or join
-        const snapshot = await roomRef.once('value');
+        const snapshot = await Promise.race([roomRef.once('value'), timeoutPromise]);
         const data = snapshot.val();
 
         if (!data) {
@@ -477,6 +482,7 @@
           }
         }, (err) => {
           console.error("Realtime sync error:", err);
+          alert("Sync error: " + err.message);
         });
 
         // Switch to game screen
@@ -487,600 +493,455 @@
 
       } catch (err) {
         console.error("Join room error:", err);
-        alert("Connection Error:\n" + err.message + "\n\nPlease ensure your Firebase Realtime Database is created with test rules (read/write: true).");
+        alert("Connection Error:\n" + err.message + "\n\n1. Ensure Realtime Database is created in Firebase Console.\n2. Verify databaseURL match.\n3. Check if an ad-blocker is active.");
       } finally {
         if (btn) btn.disabled = false;
       }
     };
 
-    async function joinExistingRoom(data, currentUsername) {
-      gameState = data;
-      if (!gameState.players) gameState.players = {};
-      if (!gameState.turnOrder) gameState.turnOrder = [];
-
-      if (!gameState.players[currentUser.uid]) {
-        const updatedPlayers = { ...gameState.players };
-        updatedPlayers[currentUser.uid] = {
-          uid: currentUser.uid,
-          name: currentUsername,
-          totalScore: 0,
-          status: gameState.status === 'lobby' ? 'waiting' : 'stayed',
-          cards: [],
-          secondChance: false,
-          flip7Bonus: false
-        };
-        const updatedOrder = [...gameState.turnOrder, currentUser.uid];
-        
-        await getRoomRef(currentRoomCode).update({
-          players: updatedPlayers,
-          turnOrder: updatedOrder,
-          logs: [...(gameState.logs || []), `${currentUsername} joined the room.`]
-        });
-      }
-    }
-
     async function createNewRoom(roomRef, username) {
       const initialDeck = createFlip7Deck();
-      const initialData = {
+      const newRoom = {
         code: currentRoomCode,
+        status: 'lobby', // lobby, playing, ended
         hostId: currentUser.uid,
-        status: 'lobby',
         round: 1,
         turnIndex: 0,
+        playerOrder: [currentUser.uid],
         deck: initialDeck,
+        discard: [],
+        logs: [`Room ${currentRoomCode} created by ${username}`],
         players: {
           [currentUser.uid]: {
-            uid: currentUser.uid,
+            id: currentUser.uid,
             name: username,
             totalScore: 0,
-            status: 'waiting',
+            roundScore: 0,
+            status: 'active', // active, stayed, busted, frozen
             cards: [],
-            secondChance: false,
             flip7Bonus: false
           }
-        },
-        turnOrder: [currentUser.uid],
-        logs: [`Room ${currentRoomCode} created by ${username}.`]
+        }
       };
-
-      await roomRef.set(initialData);
+      await roomRef.set(newRoom);
     }
 
-    async function handleRoomUpdate(data, currentUsername) {
-      gameState = data;
-      if (!gameState.players) gameState.players = {};
-      if (!gameState.turnOrder) gameState.turnOrder = [];
+    async function joinExistingRoom(data, currentUsername) {
+      const roomRef = getRoomRef(currentRoomCode);
+      const players = data.players || {};
+      const playerOrder = data.playerOrder || [];
 
-      if (!gameState.players[currentUser.uid]) {
-        const updatedPlayers = { ...gameState.players };
-        updatedPlayers[currentUser.uid] = {
-          uid: currentUser.uid,
+      if (!players[currentUser.uid]) {
+        if (data.status !== 'lobby') {
+          alert("Game is currently in progress. You can watch or join next game!");
+        }
+        players[currentUser.uid] = {
+          id: currentUser.uid,
           name: currentUsername,
           totalScore: 0,
-          status: gameState.status === 'lobby' ? 'waiting' : 'stayed',
+          roundScore: 0,
+          status: 'active',
           cards: [],
-          secondChance: false,
           flip7Bonus: false
         };
-        const updatedOrder = [...gameState.turnOrder, currentUser.uid];
-        
-        await getRoomRef(currentRoomCode).update({
-          players: updatedPlayers,
-          turnOrder: updatedOrder,
-          logs: [...(gameState.logs || []), `${currentUsername} joined the room.`]
+        if (!playerOrder.includes(currentUser.uid)) {
+          playerOrder.push(currentUser.uid);
+        }
+        const updatedLogs = [...(data.logs || []), `${currentUsername} joined the room`].slice(-50);
+        await roomRef.update({
+          players: players,
+          playerOrder: playerOrder,
+          logs: updatedLogs
         });
-        return;
       }
-
-      document.getElementById('screen-join').classList.add('hidden');
-      document.getElementById('screen-game').classList.remove('hidden');
-      document.getElementById('btn-copy-link').classList.remove('hidden');
-      document.getElementById('room-status-sub').textContent = `Room Code: ${currentRoomCode}`;
-
-      renderGameState();
     }
 
+    // GAME ACTIONS
+    window.hostStartOrNextRound = async () => {
+      if (!gameState || gameState.hostId !== currentUser.uid) return;
+      const roomRef = getRoomRef(currentRoomCode);
+
+      if (gameState.status === 'lobby' || gameState.status === 'ended') {
+        const deck = createFlip7Deck();
+        const updatedPlayers = {};
+        gameState.playerOrder.forEach(pid => {
+          if (gameState.players[pid]) {
+            updatedPlayers[pid] = {
+              ...gameState.players[pid],
+              roundScore: 0,
+              status: 'active',
+              cards: [],
+              flip7Bonus: false
+            };
+          }
+        });
+
+        await roomRef.update({
+          status: 'playing',
+          round: gameState.status === 'ended' ? 1 : gameState.round,
+          deck: deck,
+          discard: [],
+          turnIndex: 0,
+          players: updatedPlayers,
+          logs: [...(gameState.logs || []), `Round ${gameState.round} started!`].slice(-50)
+        });
+      }
+    };
+
+    window.actionHit = async () => {
+      if (!gameState || gameState.status !== 'playing') return;
+      const activePlayerId = gameState.playerOrder[gameState.turnIndex];
+      if (activePlayerId !== currentUser.uid) return;
+
+      const player = gameState.players[currentUser.uid];
+      if (!player || player.status !== 'active') return;
+
+      const roomRef = getRoomRef(currentRoomCode);
+      let deck = [...(gameState.deck || [])];
+      
+      if (deck.length === 0) {
+        deck = createFlip7Deck();
+      }
+
+      const drawnCard = deck.shift();
+      playSound('card');
+
+      const updatedCards = [...(player.cards || []), drawnCard];
+      let updatedStatus = player.status;
+      let logs = [...(gameState.logs || [])];
+      let flip7Bonus = player.flip7Bonus || false;
+
+      // Handle Action Card logic
+      if (drawnCard.type === 'action') {
+        if (drawnCard.action === 'Freeze') {
+          pendingActionCard = { type: 'Freeze', card: drawnCard };
+          showTargetModal('Freeze Player', 'Choose a player to freeze for the remainder of this round:');
+          return;
+        } else if (drawnCard.action === 'Flip Three') {
+          pendingActionCard = { type: 'Flip Three', card: drawnCard };
+          showTargetModal('Flip Three Cards', 'Choose a player who must draw 3 cards:');
+          return;
+        }
+      }
+
+      // Check duplicate number bust & Second Chance shield
+      if (drawnCard.type === 'number') {
+        const existingNumbers = updatedCards.filter(c => c.type === 'number');
+        const count = existingNumbers.filter(c => c.value === drawnCard.value).length;
+        
+        if (count > 1) {
+          const secondChanceIndex = updatedCards.findIndex(c => c.type === 'action' && c.action === 'Second Chance');
+          if (secondChanceIndex !== -1) {
+            // Protect with Second Chance shield
+            updatedCards.splice(secondChanceIndex, 1);
+            const drawnIndex = updatedCards.findIndex(c => c.id === drawnCard.id);
+            if (drawnIndex !== -1) updatedCards.splice(drawnIndex, 1);
+            logs.push(`${player.name}'s Second Chance saved them from drawing duplicate ${drawnCard.value}!`);
+          } else {
+            // Bust
+            updatedStatus = 'busted';
+            playSound('bust');
+            logs.push(`${player.name} drew duplicate ${drawnCard.value} and BUSTED!`);
+          }
+        }
+      }
+
+      // Check Flip 7 Bonus condition (7 unique numbers)
+      const uniqueNumbers = new Set(updatedCards.filter(c => c.type === 'number').map(c => c.value));
+      if (uniqueNumbers.size >= 7 && updatedStatus !== 'busted') {
+        flip7Bonus = true;
+        updatedStatus = 'stayed';
+        playSound('win');
+        logs.push(`🎉 ${player.name} got a FLIP 7! +15 Bonus points awarded!`);
+      }
+
+      const updatedPlayer = {
+        ...player,
+        cards: updatedCards,
+        status: updatedStatus,
+        flip7Bonus: flip7Bonus,
+        roundScore: updatedStatus === 'busted' ? 0 : calculatePlayerScore({ cards: updatedCards, status: updatedStatus, flip7Bonus: flip7Bonus })
+      };
+
+      const nextTurnIndex = getNextTurnIndex(gameState.turnIndex, gameState.playerOrder, { ...gameState.players, [currentUser.uid]: updatedPlayer });
+      
+      const updatePayload = {
+        deck: deck,
+        turnIndex: nextTurnIndex,
+        [`players/${currentUser.uid}`]: updatedPlayer,
+        logs: logs.slice(-50)
+      };
+
+      await roomRef.update(updatePayload);
+      checkRoundCompletion();
+    };
+
+    window.actionStay = async () => {
+      if (!gameState || gameState.status !== 'playing') return;
+      const activePlayerId = gameState.playerOrder[gameState.turnIndex];
+      if (activePlayerId !== currentUser.uid) return;
+
+      const player = gameState.players[currentUser.uid];
+      if (!player || player.status !== 'active') return;
+
+      playSound('stay');
+      const roomRef = getRoomRef(currentRoomCode);
+
+      const finalRoundScore = calculatePlayerScore(player);
+      const updatedPlayer = {
+        ...player,
+        status: 'stayed',
+        roundScore: finalRoundScore
+      };
+
+      const logs = [...(gameState.logs || []), `${player.name} STAYED with ${finalRoundScore} pts`].slice(-50);
+      const nextTurnIndex = getNextTurnIndex(gameState.turnIndex, gameState.playerOrder, { ...gameState.players, [currentUser.uid]: updatedPlayer });
+
+      await roomRef.update({
+        turnIndex: nextTurnIndex,
+        [`players/${currentUser.uid}`]: updatedPlayer,
+        logs: logs
+      });
+
+      checkRoundCompletion();
+    };
+
+    function getNextTurnIndex(currentIndex, order, players) {
+      const total = order.length;
+      for (let i = 1; i <= total; i++) {
+        const nextIdx = (currentIndex + i) % total;
+        const pid = order[nextIdx];
+        if (players[pid] && players[pid].status === 'active') {
+          return nextIdx;
+        }
+      }
+      return currentIndex;
+    }
+
+    async function checkRoundCompletion() {
+      if (!gameState) return;
+      const playersArr = Object.values(gameState.players || {});
+      const activePlayers = playersArr.filter(p => p.status === 'active');
+
+      if (activePlayers.length === 0 && gameState.status === 'playing') {
+        const roomRef = getRoomRef(currentRoomCode);
+        const updatedPlayers = {};
+        let winnerName = null;
+        let maxScore = 0;
+
+        playersArr.forEach(p => {
+          const newTotal = (p.totalScore || 0) + (p.status === 'busted' ? 0 : (p.roundScore || 0));
+          updatedPlayers[p.id] = {
+            ...p,
+            totalScore: newTotal,
+            cards: [],
+            roundScore: 0,
+            status: 'active'
+          };
+
+          if (newTotal >= 200 && newTotal > maxScore) {
+            maxScore = newTotal;
+            winnerName = p.name;
+          }
+        });
+
+        const logs = [...(gameState.logs || []), `Round ${gameState.round} completed!`];
+        let gameStatus = 'lobby';
+
+        if (winnerName) {
+          gameStatus = 'ended';
+          logs.push(`🏆 ${winnerName} won the game with ${maxScore} points!`);
+          confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
+        }
+
+        await roomRef.update({
+          status: gameStatus,
+          round: gameState.round + 1,
+          players: updatedPlayers,
+          logs: logs.slice(-50)
+        });
+      }
+    }
+
+    // ACTION TARGET MODAL
+    function showTargetModal(title, desc) {
+      document.getElementById('target-modal-title').textContent = title;
+      document.getElementById('target-modal-desc').textContent = desc;
+      const listEl = document.getElementById('target-player-list');
+      listEl.innerHTML = '';
+
+      gameState.playerOrder.forEach(pid => {
+        const p = gameState.players[pid];
+        if (p && p.status === 'active') {
+          const btn = document.createElement('button');
+          btn.className = "w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs rounded-xl transition flex items-center justify-between border border-slate-700";
+          btn.innerHTML = `<span>${p.name}</span> <span class="text-slate-400 font-normal">${p.cards ? p.cards.length : 0} cards</span>`;
+          btn.onclick = () => handleTargetSelected(pid);
+          listEl.appendChild(btn);
+        }
+      });
+
+      document.getElementById('modal-target').classList.remove('hidden');
+    }
+
+    async function handleTargetSelected(targetId) {
+      document.getElementById('modal-target').classList.add('hidden');
+      if (!pendingActionCard || !gameState) return;
+
+      const roomRef = getRoomRef(currentRoomCode);
+      const targetPlayer = gameState.players[targetId];
+      const me = gameState.players[currentUser.uid];
+      const logs = [...(gameState.logs || [])];
+
+      if (pendingActionCard.type === 'Freeze') {
+        logs.push(`${me.name} froze ${targetPlayer.name}!`);
+        const updatedTarget = { ...targetPlayer, status: 'stayed' };
+        await roomRef.update({
+          [`players/${targetId}`]: updatedTarget,
+          logs: logs.slice(-50)
+        });
+      }
+
+      pendingActionCard = null;
+    }
+
+    // UI RENDER LOOP
     function renderGameState() {
       if (!gameState) return;
 
-      const isHost = gameState.hostId === currentUser.uid;
-      const turnOrder = gameState.turnOrder || [];
-      const activeTurnUid = turnOrder[gameState.turnIndex];
-
-      document.getElementById('deck-count-display').textContent = gameState.deck ? gameState.deck.length : 0;
-
-      const statusText = document.getElementById('status-text');
-
-      if (gameState.status === 'lobby') {
-        statusText.textContent = `Lobby (${turnOrder.length} Player${turnOrder.length > 1 ? 's' : ''})`;
-      } else if (gameState.status === 'playing') {
-        const activePlayerName = gameState.players[activeTurnUid]?.name || 'Player';
-        statusText.textContent = `${activePlayerName}'s Turn`;
-      } else if (gameState.status === 'round_over') {
-        statusText.textContent = 'Round Completed!';
-      } else if (gameState.status === 'game_over') {
-        statusText.textContent = 'Game Over!';
-      }
-
+      // Update Header Deck Count
+      const deckCount = gameState.deck ? gameState.deck.length : 0;
+      document.getElementById('deck-count-display').textContent = deckCount;
       document.getElementById('round-number').textContent = gameState.round || 1;
 
-      const turnControls = document.getElementById('turn-controls');
-      if (gameState.status === 'playing' && activeTurnUid === currentUser.uid) {
-        turnControls.classList.remove('hidden');
-      } else {
-        turnControls.classList.add('hidden');
-      }
+      // Update Controls Visibility
+      const isHost = gameState.hostId === currentUser.uid;
+      const activePlayerId = gameState.playerOrder[gameState.turnIndex];
+      const isMyTurn = activePlayerId === currentUser.uid && gameState.status === 'playing';
 
-      const hostControls = document.getElementById('host-controls');
+      document.getElementById('turn-controls').classList.toggle('hidden', !isMyTurn);
+      document.getElementById('host-controls').classList.toggle('hidden', !isHost || gameState.status === 'playing');
+      
       const hostBtnText = document.getElementById('host-action-text');
-
-      if (isHost) {
-        hostControls.classList.remove('hidden');
-        if (gameState.status === 'lobby') {
-          hostBtnText.textContent = turnOrder.length >= 2 ? 'Start Game' : 'Waiting for Players (2+ Required)';
-          document.getElementById('btn-host-action').disabled = turnOrder.length < 2;
-        } else if (gameState.status === 'round_over') {
-          hostBtnText.textContent = 'Next Round';
-          document.getElementById('btn-host-action').disabled = false;
-        } else if (gameState.status === 'game_over') {
-          hostBtnText.textContent = 'New Game';
-          document.getElementById('btn-host-action').disabled = false;
-        } else {
-          hostControls.classList.add('hidden');
-        }
-      } else {
-        hostControls.classList.add('hidden');
+      if (hostBtnText) {
+        hostBtnText.textContent = gameState.status === 'ended' ? 'Play Again' : 'Start Game';
       }
 
-      const playersTable = document.getElementById('players-table');
-      playersTable.innerHTML = '';
+      // Render Table Status
+      const statusText = document.getElementById('status-text');
+      if (gameState.status === 'lobby') {
+        statusText.textContent = isHost ? "Ready to Start!" : "Waiting for Host to start...";
+      } else if (gameState.status === 'playing') {
+        const activeName = gameState.players[activePlayerId] ? gameState.players[activePlayerId].name : 'Someone';
+        statusText.textContent = isMyTurn ? "YOUR TURN!" : `${activeName}'s Turn...`;
+      } else if (gameState.status === 'ended') {
+        statusText.textContent = "Game Finished!";
+      }
 
-      turnOrder.forEach(uid => {
-        const player = gameState.players[uid];
-        if (!player) return;
+      // Render Players Card Table
+      const tableEl = document.getElementById('players-table');
+      tableEl.innerHTML = '';
 
-        const isCurrentTurn = gameState.status === 'playing' && uid === activeTurnUid;
-        const currentRoundPoints = calculatePlayerScore(player);
+      gameState.playerOrder.forEach(pid => {
+        const p = gameState.players[pid];
+        if (!p) return;
 
-        const cardContainer = document.createElement('div');
-        cardContainer.className = `bg-slate-900/90 border ${isCurrentTurn ? 'border-amber-500 active-turn-glow' : 'border-slate-800'} rounded-2xl p-4 flex flex-col justify-between transition-all duration-300 relative overflow-hidden`;
+        const isCurrentTurn = pid === activePlayerId && gameState.status === 'playing';
+        const cardBox = document.createElement('div');
+        cardBox.className = `bg-slate-900/90 border ${isCurrentTurn ? 'border-amber-500/80 active-turn-glow' : 'border-slate-800'} rounded-2xl p-4 flex flex-col justify-between transition-all shadow-xl relative overflow-hidden`;
 
-        let statusTag = '';
-        if (player.status === 'busted') {
-          statusTag = '<span class="px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 text-xs font-extrabold uppercase">Busted</span>';
-        } else if (player.status === 'stayed') {
-          statusTag = '<span class="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-extrabold uppercase">Stayed</span>';
-        } else if (isCurrentTurn) {
-          statusTag = '<span class="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-extrabold uppercase animate-pulse">Active</span>';
-        }
+        let statusBadge = `<span class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-bold uppercase">In Round</span>`;
+        if (p.status === 'busted') statusBadge = `<span class="px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-bold uppercase">Busted</span>`;
+        if (p.status === 'stayed') statusBadge = `<span class="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold uppercase">Stayed</span>`;
 
-        const secondChanceBadge = player.secondChance ? '<span title="Second Chance Shield Active" class="px-2 py-0.5 bg-sky-500/10 text-sky-400 border border-sky-500/20 rounded-full text-xs font-bold">🛡️ Shield</span>' : '';
+        const cardsHTML = (p.cards || []).map(c => {
+          let bgClass = "bg-slate-800 text-white border-slate-700";
+          if (c.type === 'modifier') bgClass = "bg-indigo-900/40 text-indigo-300 border-indigo-700/50";
+          if (c.type === 'action') bgClass = "bg-amber-900/40 text-amber-300 border-amber-700/50";
 
-        cardContainer.innerHTML = `
+          return `
+            <div class="${bgClass} border rounded-xl px-2.5 py-3 text-center flex flex-col items-center justify-center font-display font-extrabold text-sm shadow-md animate-draw min-w-[42px]">
+              <span>${c.label}</span>
+            </div>
+          `;
+        }).join('');
+
+        cardBox.innerHTML = `
           <div>
             <div class="flex items-center justify-between mb-3 border-b border-slate-800/80 pb-2">
               <div class="flex items-center gap-2">
-                <div class="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-white">
-                  ${player.name.substring(0, 2).toUpperCase()}
-                </div>
-                <div>
-                  <h4 class="font-bold text-sm text-white flex items-center gap-1.5">
-                    ${player.name}
-                    ${uid === currentUser.uid ? '<span class="text-[10px] text-slate-400 font-normal">(You)</span>' : ''}
-                  </h4>
-                  <div class="text-[11px] text-slate-400">Total: <strong class="text-amber-400 font-bold">${player.totalScore} pts</strong></div>
-                </div>
+                <span class="font-bold text-white text-sm">${p.name}</span>
+                ${pid === currentUser.uid ? '<span class="text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded font-semibold">YOU</span>' : ''}
               </div>
-              <div class="flex items-center gap-1">
-                ${secondChanceBadge}
-                ${statusTag}
-              </div>
+              ${statusBadge}
             </div>
-
-            <div class="min-h-[110px] flex flex-wrap gap-2 items-center p-2 bg-slate-950/60 rounded-xl border border-slate-800/60">
-              ${player.cards.length === 0 ? '<span class="text-xs text-slate-600 italic m-auto">No cards held</span>' : ''}
-              ${player.cards.map(c => renderCardHTML(c)).join('')}
+            <div class="flex flex-wrap gap-2 py-2 min-h-[64px]">
+              ${cardsHTML.length > 0 ? cardsHTML : '<span class="text-slate-600 text-xs italic">No cards drawn</span>'}
             </div>
           </div>
-
-          <div class="mt-4 pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
-            <span class="text-slate-400 font-medium">Round Score:</span>
-            <span class="font-black text-sm text-amber-400">${currentRoundPoints} pts</span>
+          <div class="flex items-center justify-between border-t border-slate-800/80 pt-3 mt-3 text-xs">
+            <span class="text-slate-400">Round: <b class="text-amber-400 font-bold">${p.roundScore || 0}</b></span>
+            <span class="text-slate-400">Total: <b class="text-white font-bold">${p.totalScore || 0} pts</b></span>
           </div>
         `;
-
-        playersTable.appendChild(cardContainer);
+        tableEl.appendChild(cardBox);
       });
 
-      document.getElementById('player-count-pill').textContent = `${turnOrder.length} Player${turnOrder.length > 1 ? 's' : ''}`;
-
-      renderLogs();
-
-      if (gameState.status === 'game_over') {
-        confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-      }
-
-      lucide.createIcons();
-    }
-
-    function renderCardHTML(card) {
-      let bgGrad = 'from-slate-800 to-slate-900 border-slate-700 text-slate-200';
-
-      if (card.type === 'number') {
-        bgGrad = 'from-amber-500/20 to-orange-500/20 border-amber-500/40 text-amber-300';
-      } else if (card.type === 'modifier') {
-        bgGrad = card.subtype === 'mult' 
-          ? 'from-purple-500/20 to-pink-500/20 border-purple-500/40 text-purple-300' 
-          : 'from-emerald-500/20 to-teal-500/20 border-emerald-500/40 text-emerald-300';
-      } else if (card.type === 'action') {
-        bgGrad = 'from-sky-500/20 to-indigo-500/20 border-sky-500/40 text-sky-300';
-      }
-
-      return `
-        <div class="w-14 h-20 rounded-lg bg-gradient-to-b ${bgGrad} border p-1.5 flex flex-col justify-between items-center shadow-md animate-draw select-none transform hover:-translate-y-1 transition-all">
-          <span class="text-[10px] font-bold self-start opacity-75">${card.label}</span>
-          <span class="font-display font-black text-xs sm:text-sm text-center leading-tight">${card.label}</span>
-          <span class="text-[10px] font-bold self-end opacity-75">${card.label}</span>
-        </div>
-      `;
-    }
-
-    function renderLogs() {
+      // Render Logs
       const logsContainer = document.getElementById('game-logs');
       logsContainer.innerHTML = '';
-      const logs = gameState.logs || [];
-      
-      logs.slice(-50).forEach(log => {
-        const item = document.createElement('div');
-        item.className = 'text-slate-300 leading-tight py-1 border-b border-slate-800/40 last:border-none';
-        item.textContent = log;
-        logsContainer.appendChild(item);
+      (gameState.logs || []).slice().reverse().forEach(log => {
+        const logRow = document.createElement('div');
+        logRow.className = "py-1 px-2 rounded bg-slate-900/50 text-slate-300 text-[11px] border border-slate-800/40";
+        logRow.textContent = log;
+        logsContainer.appendChild(logRow);
       });
 
-      logsContainer.scrollTop = logsContainer.scrollHeight;
+      // Update Player Count Pill
+      const countPill = document.getElementById('player-count-pill');
+      if (countPill) {
+        countPill.textContent = `${gameState.playerOrder.length} Players`;
+      }
     }
 
+    // CHAT SYSTEM
     window.sendChatMessage = async (e) => {
       e.preventDefault();
       const input = document.getElementById('input-chat');
       const text = input.value.trim();
       if (!text || !gameState) return;
 
-      const myPlayer = gameState.players[currentUser.uid];
-      const name = myPlayer ? myPlayer.name : 'Player';
-      const newLog = `[Chat] ${name}: ${text}`;
-
+      const roomRef = getRoomRef(currentRoomCode);
+      const me = gameState.players[currentUser.uid];
+      const logs = [...(gameState.logs || []), `${me ? me.name : 'Player'}: ${text}`].slice(-50);
+      
       input.value = '';
-      await getRoomRef(currentRoomCode).update({
-        logs: [...(gameState.logs || []), newLog]
-      });
+      await roomRef.update({ logs: logs });
     };
 
-    window.hostStartOrNextRound = async () => {
-      if (!gameState || gameState.hostId !== currentUser.uid) return;
-
-      if (gameState.status === 'lobby' || gameState.status === 'game_over') {
-        const deck = createFlip7Deck();
-        const updatedPlayers = {};
-        const turnOrder = Object.keys(gameState.players);
-
-        if (turnOrder.length < 2) return;
-
-        turnOrder.forEach(uid => {
-          updatedPlayers[uid] = {
-            ...gameState.players[uid],
-            totalScore: 0,
-            status: 'active',
-            cards: [],
-            secondChance: false,
-            flip7Bonus: false
-          };
-        });
-
-        turnOrder.forEach(uid => {
-          const card = deck.pop();
-          if (card.type === 'action' && card.action === 'Second Chance') {
-            updatedPlayers[uid].secondChance = true;
-          }
-          if (!updatedPlayers[uid].cards) updatedPlayers[uid].cards = [];
-          updatedPlayers[uid].cards.push(card);
-        });
-
-        await getRoomRef(currentRoomCode).update({
-          status: 'playing',
-          round: 1,
-          deck: deck,
-          turnIndex: 0,
-          players: updatedPlayers,
-          logs: [...(gameState.logs || []), '🎲 Game Started! Initial cards dealt.']
-        });
-        playSound('card');
-
-      } else if (gameState.status === 'round_over') {
-        let deck = [...(gameState.deck || [])];
-        if (deck.length < 20) {
-          deck = createFlip7Deck();
-        }
-
-        const updatedPlayers = {};
-        const turnOrder = gameState.turnOrder;
-
-        turnOrder.forEach(uid => {
-          updatedPlayers[uid] = {
-            ...gameState.players[uid],
-            status: 'active',
-            cards: [],
-            secondChance: false,
-            flip7Bonus: false
-          };
-        });
-
-        turnOrder.forEach(uid => {
-          const card = deck.pop();
-          if (card.type === 'action' && card.action === 'Second Chance') {
-            updatedPlayers[uid].secondChance = true;
-          }
-          if (!updatedPlayers[uid].cards) updatedPlayers[uid].cards = [];
-          updatedPlayers[uid].cards.push(card);
-        });
-
-        await getRoomRef(currentRoomCode).update({
-          status: 'playing',
-          round: gameState.round + 1,
-          deck: deck,
-          players: updatedPlayers,
-          turnIndex: 0,
-          logs: [...(gameState.logs || []), `🎲 Round ${gameState.round + 1} started!`]
-        });
-        playSound('card');
-      }
-    };
-
-    window.actionHit = async () => {
-      if (!gameState || gameState.status !== 'playing') return;
-      const activeTurnUid = gameState.turnOrder[gameState.turnIndex];
-      if (activeTurnUid !== currentUser.uid) return;
-
-      let deck = [...(gameState.deck || [])];
-      if (deck.length === 0) {
-        deck = createFlip7Deck();
-      }
-
-      const drawnCard = deck.pop();
-      const players = { ...gameState.players };
-      const player = { ...players[currentUser.uid] };
-      if (!player.cards) player.cards = [];
-      const logs = [...(gameState.logs || [])];
-
-      logs.push(`${player.name} drew a card (${drawnCard.label}).`);
-
-      if (drawnCard.type === 'action') {
-        if (drawnCard.action === 'Second Chance') {
-          player.secondChance = true;
-          player.cards.push(drawnCard);
-          logs.push(`🛡️ ${player.name} gained a Second Chance shield!`);
-          playSound('card');
-          advanceTurnOrEndRound(deck, players, player, logs);
-          return;
-        } else if (drawnCard.action === 'Freeze' || drawnCard.action === 'Flip Three') {
-          const activeTargets = gameState.turnOrder.filter(uid => players[uid].status === 'active');
-          if (activeTargets.length > 1) {
-            pendingActionCard = { drawnCard, deck, players, player, logs };
-            showTargetModal(drawnCard.action, activeTargets);
-            return;
-          } else {
-            executeActionCard(drawnCard, currentUser.uid, deck, players, player, logs);
-            return;
-          }
-        }
-      }
-
-      if (drawnCard.type === 'number') {
-        const hasDuplicate = player.cards.some(c => c.type === 'number' && c.value === drawnCard.value);
-        if (hasDuplicate) {
-          if (player.secondChance) {
-            player.secondChance = false;
-            const scIndex = player.cards.findIndex(c => c.type === 'action' && c.action === 'Second Chance');
-            if (scIndex !== -1) player.cards.splice(scIndex, 1);
-            
-            logs.push(`🛡️ ${player.name} drew duplicate ${drawnCard.value}, but Second Chance SAVED them!`);
-            playSound('card');
-          } else {
-            player.status = 'busted';
-            player.cards.push(drawnCard);
-            logs.push(`💥 BUST! ${player.name} drew duplicate ${drawnCard.value} and is out of the round!`);
-            playSound('bust');
-          }
-        } else {
-          player.cards.push(drawnCard);
-          playSound('card');
-        }
-      } else {
-        player.cards.push(drawnCard);
-        playSound('card');
-      }
-
-      const uniqueNumbers = new Set(player.cards.filter(c => c.type === 'number').map(c => c.value));
-      if (uniqueNumbers.size >= 7) {
-        player.flip7Bonus = true;
-        logs.push(`🌟 FLIP 7! ${player.name} reached 7 unique numbers! Round ends immediately (+15 Bonus)!`);
-        playSound('win');
-        players[currentUser.uid] = player;
-        endRoundImmediate(players, logs, deck);
-        return;
-      }
-
-      players[currentUser.uid] = player;
-      advanceTurnOrEndRound(deck, players, player, logs);
-    };
-
-    function showTargetModal(actionName, targetUids) {
-      const modal = document.getElementById('modal-target');
-      const title = document.getElementById('target-modal-title');
-      const desc = document.getElementById('target-modal-desc');
-      const list = document.getElementById('target-player-list');
-
-      title.textContent = `Target for ${actionName}`;
-      desc.textContent = `Choose an active player to receive ${actionName}:`;
-      list.innerHTML = '';
-
-      targetUids.forEach(uid => {
-        const p = gameState.players[uid];
-        const btn = document.createElement('button');
-        btn.className = 'w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 font-bold rounded-xl text-white text-sm transition flex items-center justify-between';
-        btn.innerHTML = `<span>${p.name} ${uid === currentUser.uid ? '(You)' : ''}</span> <i data-lucide="chevron-right" class="w-4 h-4"></i>`;
-        btn.onclick = () => {
-          modal.classList.add('hidden');
-          const { drawnCard, deck, players, player, logs } = pendingActionCard;
-          executeActionCard(drawnCard, uid, deck, players, player, logs);
-        };
-        list.appendChild(btn);
-      });
-
-      modal.classList.remove('hidden');
-      lucide.createIcons();
-    }
-
-    async function executeActionCard(actionCard, targetUid, deck, players, player, logs) {
-      const targetPlayer = { ...players[targetUid] };
-      if (!targetPlayer.cards) targetPlayer.cards = [];
-
-      if (actionCard.action === 'Freeze') {
-        targetPlayer.status = 'stayed';
-        logs.push(`❄️ ${player.name} played FREEZE on ${targetPlayer.name}! ${targetPlayer.name} is forced to Stay.`);
-        playSound('stay');
-      } else if (actionCard.action === 'Flip Three') {
-        logs.push(`⚡ ${player.name} played FLIP THREE on ${targetPlayer.name}! Drawing 3 cards...`);
-        for (let i = 0; i < 3; i++) {
-          if (targetPlayer.status === 'busted' || targetPlayer.status === 'stayed') break;
-          const extraCard = deck.pop();
-          
-          if (extraCard.type === 'number') {
-            const hasDup = targetPlayer.cards.some(c => c.type === 'number' && c.value === extraCard.value);
-            if (hasDup) {
-              if (targetPlayer.secondChance) {
-                targetPlayer.secondChance = false;
-                const scIndex = targetPlayer.cards.findIndex(c => c.type === 'action' && c.action === 'Second Chance');
-                if (scIndex !== -1) targetPlayer.cards.splice(scIndex, 1);
-                logs.push(`🛡️ ${targetPlayer.name} drew duplicate ${extraCard.value} during Flip 3, but Second Chance saved them!`);
-              } else {
-                targetPlayer.status = 'busted';
-                targetPlayer.cards.push(extraCard);
-                logs.push(`💥 ${targetPlayer.name} BUSTED on Flip Three card #${i + 1} (${extraCard.label})!`);
-                playSound('bust');
-                break;
-              }
-            } else {
-              targetPlayer.cards.push(extraCard);
-            }
-          } else {
-            targetPlayer.cards.push(extraCard);
-          }
-        }
-      }
-
-      if (!player.cards) player.cards = [];
-      player.cards.push(actionCard);
-      players[currentUser.uid] = player;
-      players[targetUid] = targetPlayer;
-
-      advanceTurnOrEndRound(deck, players, player, logs);
-    }
-
-    window.actionStay = async () => {
-      if (!gameState || gameState.status !== 'playing') return;
-      const activeTurnUid = gameState.turnOrder[gameState.turnIndex];
-      if (activeTurnUid !== currentUser.uid) return;
-
-      const players = { ...gameState.players };
-      const player = { ...players[currentUser.uid] };
-      const logs = [...(gameState.logs || [])];
-
-      player.status = 'stayed';
-      players[currentUser.uid] = player;
-      logs.push(`✋ ${player.name} chose to STAY & bank points.`);
-      playSound('stay');
-
-      advanceTurnOrEndRound(gameState.deck, players, player, logs);
-    };
-
-    async function advanceTurnOrEndRound(deck, players, currentPlayer, logs) {
-      const turnOrder = gameState.turnOrder;
-      const activePlayers = turnOrder.filter(uid => players[uid].status === 'active');
-
-      if (activePlayers.length === 0) {
-        endRoundImmediate(players, logs, deck);
-      } else {
-        let nextIndex = (gameState.turnIndex + 1) % turnOrder.length;
-        while (players[turnOrder[nextIndex]].status !== 'active') {
-          nextIndex = (nextIndex + 1) % turnOrder.length;
-        }
-
-        await getRoomRef(currentRoomCode).update({
-          deck: deck,
-          players: players,
-          turnIndex: nextIndex,
-          logs: logs
-        });
-      }
-    }
-
-    async function endRoundImmediate(players, logs, deck) {
-      let winnerDeclared = false;
-      let winnerName = '';
-
-      Object.keys(players).forEach(uid => {
-        const p = players[uid];
-        const roundPts = calculatePlayerScore(p);
-        p.totalScore = (p.totalScore || 0) + roundPts;
-
-        if (p.totalScore >= 200) {
-          winnerDeclared = true;
-          winnerName = p.name;
-        }
-      });
-
-      logs.push(`🏆 Round over! Scores updated.`);
-
-      let nextStatus = 'round_over';
-      if (winnerDeclared) {
-        nextStatus = 'game_over';
-        logs.push(`🎉🎉 GAME OVER! ${winnerName} won the game with 200+ points! 🎉🎉`);
-      }
-
-      await getRoomRef(currentRoomCode).update({
-        status: nextStatus,
-        players: players,
-        deck: deck,
-        logs: logs
-      });
-    }
-
+    // UTILITIES
     window.copyRoomLink = () => {
-      const link = `${window.location.origin}${window.location.pathname}#room=${currentRoomCode}`;
-      const tempInput = document.createElement("input");
-      tempInput.value = link;
-      document.body.appendChild(tempInput);
-      tempInput.select();
-      document.execCommand("copy");
-      document.body.removeChild(tempInput);
-
-      alert(`Invite link copied!\n${link}`);
+      const url = `${window.location.origin}${window.location.pathname}#room=${currentRoomCode}`;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => alert("Room link copied to clipboard!"));
+      } else {
+        document.execCommand('copy');
+        alert(`Room Link:\n${url}`);
+      }
     };
 
-    window.showRulesModal = () => {
-      document.getElementById('modal-rules').classList.remove('hidden');
-    };
-    window.hideRulesModal = () => {
-      document.getElementById('modal-rules').classList.add('hidden');
-    };
+    window.showRulesModal = () => document.getElementById('modal-rules').classList.remove('hidden');
+    window.hideRulesModal = () => document.getElementById('modal-rules').classList.add('hidden');
 
+    // AUTO PARSE URL HASH
     window.onload = () => {
       lucide.createIcons();
-      initAuth();
-      const match = window.location.hash.match(/room=([A-Z0-9]+)/i);
-      if (match && match[1]) {
-        document.getElementById('input-room-code').value = match[1].toUpperCase();
+      const hash = window.location.hash;
+      if (hash && hash.includes('room=')) {
+        const code = hash.split('room=')[1].split('&')[0];
+        if (code) {
+          document.getElementById('input-room-code').value = code.toUpperCase();
+        }
       }
     };
   </script>
