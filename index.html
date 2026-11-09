@@ -26,7 +26,7 @@
     .btn-secondary { background: #334155; color: #fff; padding: 8px 16px; font-size: 0.85rem; width: auto; }
   </style>
 
-  <!-- Firebase Compatibility Scripts -->
+  <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 </head>
@@ -42,7 +42,7 @@
         <label for="username">Your Nickname</label>
         <input type="text" id="username" placeholder="e.g. Alex" required maxlength="12">
 
-        <label for="room-code">Room Code (or blank to auto-generate)</label>
+        <label for="room-code">Room Code (or leave blank for new room)</label>
         <input type="text" id="room-code" placeholder="e.g. GAME1" maxlength="10">
 
         <button type="submit" id="enter-btn">ENTER GAME ROOM</button>
@@ -63,16 +63,15 @@
         <button class="btn-secondary" onclick="copyInviteLink()">Copy Invite Link</button>
       </div>
 
-      <div style="text-align: center; padding: 32px 0;">
+      <div style="text-align: center; padding: 24px 0;">
         <h2 style="margin-bottom: 8px;">Connected to Room!</h2>
-        <p style="color: #94a3b8;" id="disp-player">Waiting for players...</p>
+        <p style="color: #94a3b8;" id="disp-player">Logged in...</p>
         <div id="players-list" style="margin-top: 20px; text-align: left; background: #0f172a; padding: 16px; border-radius: 8px;"></div>
       </div>
     </div>
   </div>
 
   <script>
-    // 1. Logger Utility
     function log(msg, type = 'info') {
       const box = document.getElementById('debug-log');
       if (!box) return;
@@ -84,11 +83,11 @@
       console.log(msg);
     }
 
-    // 2. Firebase Config
+    // Explicit config with your exact regional databaseURL
     const firebaseConfig = {
       apiKey: "AIzaSyDueZlgNd4RwI2tkgxl_v0VSFXE9OYRjLc",
       authDomain: "fakeflip7.firebaseapp.com",
-      databaseURL: "https://fakeflip7-default-rtdb.europe-west1.firebasedatabase.app/",
+      databaseURL: "https://fakeflip7-default-rtdb.europe-west1.firebasedatabase.app",
       projectId: "fakeflip7",
       storageBucket: "fakeflip7.firebasestorage.app",
       messagingSenderId: "464906617088",
@@ -99,28 +98,25 @@
     let myPlayerId = 'p_' + Math.random().toString(36).substring(2, 9);
     let currentRoomCode = '';
 
-    // 3. Init Firebase on Load
     window.addEventListener('DOMContentLoaded', () => {
       try {
-        log("Initializing Firebase...");
+        log("Connecting to Europe database...");
         if (!firebase.apps.length) {
           firebase.initializeApp(firebaseConfig);
         }
         db = firebase.database();
-        log("Firebase initialized successfully!", "success");
+        log("Database engine initialized!", "success");
 
-        // Pre-fill room code from URL hash if present (#GAME123)
         if (window.location.hash) {
           const codeFromUrl = window.location.hash.substring(1).toUpperCase();
           document.getElementById('room-code').value = codeFromUrl;
           log("Detected room code from URL: " + codeFromUrl);
         }
       } catch (err) {
-        log("Firebase Init Error: " + err.message, "err");
+        log("Init Error: " + err.message, "err");
       }
     });
 
-    // 4. Room Creation / Join Handler
     async function handleEnterRoom(e) {
       e.preventDefault();
       
@@ -141,81 +137,57 @@
       currentRoomCode = roomCodeInput;
       btn.disabled = true;
       btn.textContent = "CONNECTING...";
-      log(`Attempting to join room [${currentRoomCode}] as "${usernameInput}"...`);
+      log(`Connecting to room [${currentRoomCode}]...`);
+
+      const playerRef = db.ref(`rooms/${currentRoomCode}/players/${myPlayerId}`);
+      const roomRef = db.ref(`rooms/${currentRoomCode}`);
 
       try {
-        const roomRef = db.ref('flip7_rooms/' + currentRoomCode);
-        
-        // Timeout check if Firebase doesn't respond in 5s
-        const timeout = setTimeout(() => {
-          log("Connection timed out! Check your Firebase Realtime Database status.", "err");
-          alert("Could not connect to Firebase! Make sure 'Realtime Database' is created in test mode on Firebase Console.");
-          btn.disabled = false;
-          btn.textContent = "ENTER GAME ROOM";
-        }, 6000);
-
-        // Try reading room data
-        const snapshot = await roomRef.once('value');
-        clearTimeout(timeout);
-
-        log("Database responded!", "success");
-        let roomData = snapshot.val();
-
-        if (!roomData) {
-          log(`Room [${currentRoomCode}] doesn't exist. Creating new room...`);
-          roomData = {
-            createdAt: Date.now(),
-            host: myPlayerId,
-            state: 'lobby',
-            players: {}
-          };
-        }
-
-        // Add player to room
-        roomData.players = roomData.players || {};
-        roomData.players[myPlayerId] = {
+        // Direct write test
+        await playerRef.set({
           name: usernameInput,
-          score: 0,
           joinedAt: Date.now()
-        };
-
-        // Save to Database
-        await roomRef.set(roomData);
-        log("Joined room successfully!", "success");
-
-        // Listen for real-time room changes
-        roomRef.on('value', (snap) => {
-          const updated = snap.val();
-          if (updated) renderRoomState(updated);
         });
 
-        // Update UI
+        // Set disconnect listener to clean up if window closes
+        playerRef.onDisconnect().remove();
+
+        log("Successfully connected to room!", "success");
+
+        // Listen for live room changes
+        roomRef.on('value', (snapshot) => {
+          const data = snapshot.val();
+          if (data && data.players) {
+            renderRoomState(data.players);
+          }
+        });
+
         window.location.hash = currentRoomCode;
         document.getElementById('lobby-screen').classList.add('hidden');
         document.getElementById('game-screen').classList.remove('hidden');
         document.getElementById('disp-room').textContent = currentRoomCode;
-        document.getElementById('disp-player').textContent = `Logged in as: ${usernameInput}`;
+        document.getElementById('disp-player').textContent = `Playing as: ${usernameInput}`;
 
       } catch (err) {
-        log("Firebase Read/Write Error: " + err.message, "err");
-        alert("Firebase Error: " + err.message);
+        log("Connection Failed: " + err.message, "err");
+        alert("Firebase Connection Failed: " + err.message + "\n\nMake sure your Database Rules in Firebase Console are set to read: true, write: true.");
         btn.disabled = false;
         btn.textContent = "ENTER GAME ROOM";
       }
     }
 
-    function renderRoomState(roomData) {
+    function renderRoomState(playersObj) {
       const listEl = document.getElementById('players-list');
-      if (!listEl || !roomData.players) return;
+      if (!listEl) return;
 
-      const playersHtml = Object.entries(roomData.players).map(([id, p]) => `
+      const playersHtml = Object.entries(playersObj).map(([id, p]) => `
         <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #334155;">
-          <span>${p.name} ${id === myPlayerId ? '<strong>(You)</strong>' : ''}</span>
-          <span style="color:#f59e0b;">${id === roomData.host ? 'HOST' : 'READY'}</span>
+          <span>${p.name} ${id === myPlayerId ? '<strong style="color:#f59e0b;">(You)</strong>' : ''}</span>
+          <span style="color:#4ade80;">ONLINE</span>
         </div>
       `).join('');
 
-      listEl.innerHTML = `<h3 style="margin-bottom:12px; font-size:0.9rem; color:#94a3b8;">PLAYERS IN LOBBY (${Object.keys(roomData.players).length}):</h3>` + playersHtml;
+      listEl.innerHTML = `<h3 style="margin-bottom:12px; font-size:0.9rem; color:#94a3b8;">CONNECTED PLAYERS (${Object.keys(playersObj).length}):</h3>` + playersHtml;
     }
 
     function copyInviteLink() {
