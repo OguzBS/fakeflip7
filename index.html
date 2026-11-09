@@ -15,7 +15,7 @@
   <!-- Firebase Compat SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@700;800;900&display=swap');
@@ -267,6 +267,7 @@
     const firebaseConfig = {
       apiKey: "AIzaSyDueZlgNd4RwI2tkgxl_v0VSFXE9OYRjLc",
       authDomain: "fakeflip7.firebaseapp.com",
+      databaseURL: "https://fakeflip7-default-rtdb.firebaseio.com",
       projectId: "fakeflip7",
       storageBucket: "fakeflip7.firebasestorage.app",
       messagingSenderId: "464906617088",
@@ -274,7 +275,7 @@
     };
 
     firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
+    const rtdb = firebase.database();
 
     // Audio SFX Synthesizer
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -424,10 +425,8 @@
 
       return total;
     }
-
-    function getRoomDocRef(code) {
-      const appId = typeof __app_id !== 'undefined' ? __app_id : 'flip7-live-app';
-      return db.collection('artifacts').doc(appId).collection('public').doc('data').collection('flip7_rooms').doc(code.toUpperCase());
+    function getRoomRef(code) {
+      return rtdb.ref('flip7_rooms/' + code.toUpperCase());
     }
 
     window.handleJoinOrCreate = async () => {
@@ -448,17 +447,17 @@
       currentRoomCode = roomCodeInput;
       window.location.hash = `room=${currentRoomCode}`;
 
-      const roomRef = getRoomDocRef(currentRoomCode);
-      if (roomUnsubscribe) roomUnsubscribe();
-
-      roomUnsubscribe = roomRef.onSnapshot((snapshot) => {
-        if (!snapshot.exists) {
+      const roomRef = getRoomRef(currentRoomCode);
+      
+      roomRef.on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (!data) {
           createNewRoom(roomRef, usernameInput);
         } else {
-          handleRoomUpdate(snapshot.data(), usernameInput);
+          handleRoomUpdate(data, usernameInput);
         }
       }, (err) => {
-        console.error("Firestore sync error:", err);
+        console.error("Realtime Database sync error:", err);
       });
     };
 
@@ -491,6 +490,8 @@
 
     async function handleRoomUpdate(data, currentUsername) {
       gameState = data;
+      if (!gameState.players) gameState.players = {};
+      if (!gameState.turnOrder) gameState.turnOrder = [];
 
       if (!gameState.players[currentUser.uid]) {
         const updatedPlayers = { ...gameState.players };
@@ -505,7 +506,7 @@
         };
         const updatedOrder = [...gameState.turnOrder, currentUser.uid];
         
-        await getRoomDocRef(currentRoomCode).update({
+        await getRoomRef(currentRoomCode).update({
           players: updatedPlayers,
           turnOrder: updatedOrder,
           logs: [...(gameState.logs || []), `${currentUsername} joined the room.`]
@@ -692,7 +693,7 @@
       const newLog = `[Chat] ${name}: ${text}`;
 
       input.value = '';
-      await getRoomDocRef(currentRoomCode).update({
+      await getRoomRef(currentRoomCode).update({
         logs: [...(gameState.logs || []), newLog]
       });
     };
@@ -723,10 +724,11 @@
           if (card.type === 'action' && card.action === 'Second Chance') {
             updatedPlayers[uid].secondChance = true;
           }
+          if (!updatedPlayers[uid].cards) updatedPlayers[uid].cards = [];
           updatedPlayers[uid].cards.push(card);
         });
 
-        await getRoomDocRef(currentRoomCode).update({
+        await getRoomRef(currentRoomCode).update({
           status: 'playing',
           round: 1,
           deck: deck,
@@ -760,10 +762,11 @@
           if (card.type === 'action' && card.action === 'Second Chance') {
             updatedPlayers[uid].secondChance = true;
           }
+          if (!updatedPlayers[uid].cards) updatedPlayers[uid].cards = [];
           updatedPlayers[uid].cards.push(card);
         });
 
-        await getRoomDocRef(currentRoomCode).update({
+        await getRoomRef(currentRoomCode).update({
           status: 'playing',
           round: gameState.round + 1,
           deck: deck,
@@ -780,7 +783,7 @@
       const activeTurnUid = gameState.turnOrder[gameState.turnIndex];
       if (activeTurnUid !== currentUser.uid) return;
 
-      let deck = [...gameState.deck];
+      let deck = [...(gameState.deck || [])];
       if (deck.length === 0) {
         deck = createFlip7Deck();
       }
@@ -788,6 +791,7 @@
       const drawnCard = deck.pop();
       const players = { ...gameState.players };
       const player = { ...players[currentUser.uid] };
+      if (!player.cards) player.cards = [];
       const logs = [...(gameState.logs || [])];
 
       logs.push(`${player.name} drew a card (${drawnCard.label}).`);
@@ -818,7 +822,6 @@
         if (hasDuplicate) {
           if (player.secondChance) {
             player.secondChance = false;
-            // Remove the active Second Chance card from hand as well
             const scIndex = player.cards.findIndex(c => c.type === 'action' && c.action === 'Second Chance');
             if (scIndex !== -1) player.cards.splice(scIndex, 1);
             
@@ -881,7 +884,8 @@
     }
 
     async function executeActionCard(actionCard, targetUid, deck, players, player, logs) {
-      const targetPlayer = players[targetUid];
+      const targetPlayer = { ...players[targetUid] };
+      if (!targetPlayer.cards) targetPlayer.cards = [];
 
       if (actionCard.action === 'Freeze') {
         targetPlayer.status = 'stayed';
@@ -917,6 +921,7 @@
         }
       }
 
+      if (!player.cards) player.cards = [];
       player.cards.push(actionCard);
       players[currentUser.uid] = player;
       players[targetUid] = targetPlayer;
@@ -953,7 +958,7 @@
           nextIndex = (nextIndex + 1) % turnOrder.length;
         }
 
-        await getRoomDocRef(currentRoomCode).update({
+        await getRoomRef(currentRoomCode).update({
           deck: deck,
           players: players,
           turnIndex: nextIndex,
@@ -969,7 +974,7 @@
       Object.keys(players).forEach(uid => {
         const p = players[uid];
         const roundPts = calculatePlayerScore(p);
-        p.totalScore += roundPts;
+        p.totalScore = (p.totalScore || 0) + roundPts;
 
         if (p.totalScore >= 200) {
           winnerDeclared = true;
@@ -985,7 +990,7 @@
         logs.push(`🎉🎉 GAME OVER! ${winnerName} won the game with 200+ points! 🎉🎉`);
       }
 
-      await getRoomDocRef(currentRoomCode).update({
+      await getRoomRef(currentRoomCode).update({
         status: nextStatus,
         players: players,
         deck: deck,
