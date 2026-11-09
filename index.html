@@ -7,7 +7,7 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background-color: #0f172a; color: #f8fafc; min-height: 100vh; padding: 16px; }
-    .container { max-width: 800px; margin: 0 auto; width: 100%; }
+    .container { max-width: 900px; margin: 0 auto; width: 100%; }
     .card-box { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 24px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); }
     h1 { color: #f59e0b; text-align: center; margin-bottom: 8px; font-size: 2rem; font-weight: 800; }
     p.sub { text-align: center; color: #94a3b8; margin-bottom: 24px; font-size: 0.9rem; }
@@ -20,20 +20,32 @@
     .btn-secondary:hover { background: #475569; }
     .hidden { display: none !important; }
     
-    /* Lobby & Room */
+    /* Layout */
     .game-header { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #334155; }
-    .players-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 16px 0; }
-    .player-card { background: #0f172a; border: 2px solid #334155; border-radius: 8px; padding: 12px; text-align: center; }
+    .players-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin: 16px 0; }
+    .player-card { background: #0f172a; border: 2px solid #334155; border-radius: 8px; padding: 14px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; }
     .player-card.active-turn { border-color: #f59e0b; background: #1e1b4b; }
-    .player-card.busted { border-color: #ef4444; opacity: 0.6; }
-    .player-card.stayed { border-color: #10b981; }
+    .player-card.busted { border-color: #ef4444; background: #450a0a; }
+    .player-card.stayed { border-color: #10b981; background: #064e3b; }
     
     /* Cards */
-    .cards-flex { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 10px; }
-    .game-card { width: 55px; height: 80px; background: #3b82f6; border: 2px solid #fff; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: 800; font-size: 1.2rem; color: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-    .game-card.modifier { background: #8b5cf6; }
-    .game-card.second-chance { background: #10b981; }
+    .cards-flex { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 10px; min-height: 80px; }
+    .game-card { width: 50px; height: 74px; background: #3b82f6; border: 2px solid #fff; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: 800; font-size: 1.1rem; color: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+    .game-card.modifier { background: #8b5cf6; font-size: 0.9rem; }
+    .game-card.second-chance { background: #10b981; font-size: 1rem; }
+    .game-card.action { background: #ec4899; font-size: 0.8rem; text-align: center; line-height: 1.1; }
     
+    /* Scoreboard Table */
+    .scoreboard { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+    .scoreboard table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
+    .scoreboard th, .scoreboard td { padding: 8px; border-bottom: 1px solid #1e293b; }
+    .scoreboard th { color: #f59e0b; }
+
+    /* Modal Overlay for Action Cards */
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .modal-content { background: #1e293b; border: 2px solid #f59e0b; border-radius: 12px; padding: 24px; max-width: 400px; width: 90%; text-align: center; }
+    .modal-buttons { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+
     .action-controls { display: flex; gap: 12px; margin-top: 20px; }
     .log-box { background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.8rem; color: #94a3b8; max-height: 120px; overflow-y: auto; margin-top: 16px; }
   </style>
@@ -84,6 +96,17 @@
 
       <!-- LIVE GAME AREA -->
       <div id="play-area" class="hidden">
+        <!-- SCOREBOARD -->
+        <div class="scoreboard">
+          <h3 style="font-size: 0.95rem; margin-bottom: 8px; color: #cbd5e1;">GAME SCOREBOARD</h3>
+          <table>
+            <thead>
+              <tr><th>Player</th><th>Round Score</th><th>Total Game Points</th></tr>
+            </thead>
+            <tbody id="scoreboard-body"></tbody>
+          </table>
+        </div>
+
         <div style="text-align:center; margin-bottom:16px;">
           <h3 id="turn-indicator" style="color:#f59e0b; font-size:1.3rem;">Current Turn: -</h3>
         </div>
@@ -91,12 +114,21 @@
         <div id="game-players-grid" class="players-grid"></div>
 
         <div id="my-action-controls" class="action-controls hidden">
-          <button onclick="drawCard()" style="background:#10b981; color:#fff;">HIT (FLIP CARD)</button>
-          <button onclick="stayTurn()" class="btn-secondary">STAY (KEEP POINTS)</button>
+          <button onclick="hitCard()" style="background:#10b981; color:#fff;">HIT (DRAW 1 CARD)</button>
+          <button onclick="stayTurn()" class="btn-secondary">STAY (LOCK POINTS)</button>
         </div>
 
         <div id="game-logs" class="log-box"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- ACTION MODAL OVERLAY -->
+  <div id="action-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <h3 id="modal-title" style="color:#f59e0b; margin-bottom:8px;">Action Card Triggered</h3>
+      <p id="modal-desc" style="color:#94a3b8; font-size:0.9rem; margin-bottom:16px;">Choose how to play this card:</p>
+      <div id="modal-buttons" class="modal-buttons"></div>
     </div>
   </div>
 
@@ -112,7 +144,6 @@
     };
 
     let db;
-    // Persistent Player ID across page refreshes
     let myPlayerId = localStorage.getItem('flip7_pid');
     if (!myPlayerId) {
       myPlayerId = 'p_' + Math.random().toString(36).substring(2, 9);
@@ -146,7 +177,6 @@
         const snap = await roomRef.once('value');
         const roomData = snap.val() || {};
 
-        // If room is empty or has no host, make this player the host & set state to waiting
         if (!roomData.host || !roomData.players) {
           await roomRef.set({
             host: myPlayerId,
@@ -158,6 +188,7 @@
         await playerRef.set({
           name: username,
           totalScore: 0,
+          roundScore: 0,
           currentHand: [],
           status: 'active'
         });
@@ -181,12 +212,19 @@
 
     function createDeck() {
       let deck = [];
+      // Number cards 0-12 matching frequency
       for (let i = 0; i <= 12; i++) {
         let count = i === 0 ? 1 : i;
         for (let j = 0; j < count; j++) deck.push({ type: 'number', val: i });
       }
+      // Modifiers
       ['+2', '+3', '+4', '+5', '+6', '+7', '+8', '+9', '+10', 'x2'].forEach(m => deck.push({ type: 'modifier', val: m }));
-      for (let i = 0; i < 3; i++) deck.push({ type: 'second-chance', val: '🛡️' });
+      // Second Chance Shields
+      for (let i = 0; i < 3; i++) deck.push({ type: 'second-chance', val: '🛡️', display: '🛡️ Shield' });
+      // Action Cards (Freeze, Flip Three)
+      for (let i = 0; i < 3; i++) deck.push({ type: 'action', val: 'FREEZE', display: '❄️ Freeze' });
+      for (let i = 0; i < 3; i++) deck.push({ type: 'action', val: 'FLIP3', display: '3️⃣ Flip 3' });
+
       return deck.sort(() => Math.random() - 0.5);
     }
 
@@ -207,88 +245,243 @@
       });
 
       for (let pid of playerIds) {
-        await roomRef.child(`players/${pid}`).update({ currentHand: [], status: 'playing' });
+        await roomRef.child(`players/${pid}`).update({ currentHand: [], roundScore: 0, status: 'playing' });
       }
     }
 
-    async function drawCard() {
+    async function hitCard() {
       const snap = await roomRef.once('value');
       const room = snap.val();
-      let deck = room.deck || [];
+      if (room.playerOrder[room.turnIndex] !== myPlayerId) return;
 
+      let deck = room.deck || [];
       if (deck.length === 0) deck = createDeck();
       const card = deck.pop();
 
       let myHand = room.players[myPlayerId].currentHand || [];
-      const isNumber = card.type === 'number';
-      const hasDuplicate = isNumber && myHand.some(c => c.type === 'number' && c.val === card.val);
 
-      if (hasDuplicate) {
-        const scIndex = myHand.findIndex(c => c.type === 'second-chance');
-        if (scIndex !== -1) {
-          myHand.splice(scIndex, 1);
-          addLog(`${room.players[myPlayerId].name} hit duplicate ${card.val} but used SECOND CHANCE!`);
-        } else {
-          addLog(`${room.players[myPlayerId].name} hit duplicate ${card.val} and BUSTED!`);
-          await roomRef.child(`players/${myPlayerId}`).update({ currentHand: [], status: 'busted' });
-          nextTurn(room);
-          return;
+      // 1. Handle Number Card & Bust check
+      if (card.type === 'number') {
+        const hasDuplicate = myHand.some(c => c.type === 'number' && c.val === card.val);
+        if (hasDuplicate) {
+          const scIndex = myHand.findIndex(c => c.type === 'second-chance');
+          if (scIndex !== -1) {
+            myHand.splice(scIndex, 1);
+            myHand.push(card);
+            addLog(`${room.players[myPlayerId].name} hit duplicate ${card.val} but was saved by SECOND CHANCE!`);
+            await roomRef.child(`players/${myPlayerId}`).update({ currentHand: myHand });
+            await roomRef.child('deck').set(deck);
+            await advanceTurn(room); // Hit finishes turn
+            return;
+          } else {
+            myHand.push(card);
+            addLog(`${room.players[myPlayerId].name} hit duplicate ${card.val} and BUSTED!`);
+            await roomRef.child(`players/${myPlayerId}`).update({ currentHand: myHand, status: 'busted', roundScore: 0 });
+            await roomRef.child('deck').set(deck);
+            await advanceTurn(room);
+            return;
+          }
+        }
+      }
+
+      // 2. Handle Action Cards with choices
+      if (card.type === 'action') {
+        myHand.push(card);
+        await roomRef.child(`players/${myPlayerId}`).update({ currentHand: myHand });
+        await roomRef.child('deck').set(deck);
+
+        if (card.val === 'FREEZE') {
+          showFreezeModal(room);
+          return; // Pause turn progression until modal choice is made
+        } else if (card.val === 'FLIP3') {
+          showFlip3Modal(room);
+          return; // Pause turn progression until modal choice is made
         }
       } else {
         myHand.push(card);
-        addLog(`${room.players[myPlayerId].name} drew [${card.val}]`);
+        addLog(`${room.players[myPlayerId].name} drew [${card.val !== undefined ? card.val : card.display}]`);
       }
 
-      await roomRef.child(`players/${myPlayerId}`).update({ currentHand: myHand });
+      let currentRoundScore = calculateHandScore(myHand);
+      await roomRef.child(`players/${myPlayerId}`).update({
+        currentHand: myHand,
+        roundScore: currentRoundScore
+      });
       await roomRef.child('deck').set(deck);
+
+      // Hit completed 1 card -> Advance Turn
+      await advanceTurn(room);
+    }
+
+    function showFreezeModal(room) {
+      const modal = document.getElementById('action-modal');
+      const title = document.getElementById('modal-title');
+      const desc = document.getElementById('modal-desc');
+      const btns = document.getElementById('modal-buttons');
+
+      title.textContent = "❄️ Freeze Action Card Drawn!";
+      desc.textContent = "Choose an active opponent to freeze and force them to stay:";
+
+      const activeOpponents = room.playerOrder
+        .filter(pid => pid !== myPlayerId && room.players[pid].status === 'playing')
+        .map(pid => ({ id: pid, name: room.players[pid].name }));
+
+      if (activeOpponents.length === 0) {
+        modal.classList.add('hidden');
+        addLog(`${room.players[myPlayerId].name} drew Freeze, but no opponents available to freeze.`);
+        advanceTurn(room);
+        return;
+      }
+
+      btns.innerHTML = activeOpponents.map(op => `
+        <button onclick="resolveFreeze('${op.id}')" style="background:#3b82f6; color:#fff;">Freeze ${op.name}</button>
+      `).join('');
+
+      modal.classList.remove('hidden');
+    }
+
+    async function resolveFreeze(targetId) {
+      document.getElementById('action-modal').classList.add('hidden');
+      const snap = await roomRef.once('value');
+      const room = snap.val();
+      const targetPlayer = room.players[targetId];
+
+      let tScore = calculateHandScore(targetPlayer.currentHand || []);
+      addLog(`${room.players[myPlayerId].name} froze ${targetPlayer.name}, forcing them to stay with ${tScore} points!`);
+
+      await roomRef.child(`players/${targetId}`).update({
+        totalScore: (targetPlayer.totalScore || 0) + tScore,
+        roundScore: tScore,
+        status: 'stayed'
+      });
+
+      await advanceTurn(room);
+    }
+
+    function showFlip3Modal(room) {
+      const modal = document.getElementById('action-modal');
+      const title = document.getElementById('modal-title');
+      const desc = document.getElementById('modal-desc');
+      const btns = document.getElementById('modal-buttons');
+
+      title.textContent = "3️⃣ Flip Three Action Card Drawn!";
+      desc.textContent = "Choose how to use Flip 3:";
+
+      const activeOpponents = room.playerOrder
+        .filter(pid => pid !== myPlayerId && room.players[pid].status === 'playing')
+        .map(pid => ({ id: pid, name: room.players[pid].name }));
+
+      let html = `<button onclick="resolveFlip3('self')" style="background:#10b981; color:#fff;">Use on Yourself (Draw 3 Cards)</button>`;
+      
+      if (activeOpponents.length > 0) {
+        html += `<div style="margin-top:8px; font-size:0.8rem; color:#94a3b8;">Or force an opponent to draw 3 cards:</div>`;
+        html += activeOpponents.map(op => `
+          <button onclick="resolveFlip3('${op.id}')" style="background:#ec4899; color:#fff; margin-top:6px;">Force ${op.name} to Draw 3</button>
+        `).join('');
+      }
+
+      btns.innerHTML = html;
+      modal.classList.remove('hidden');
+    }
+
+    async function resolveFlip3(targetId) {
+      document.getElementById('action-modal').classList.add('hidden');
+      const snap = await roomRef.once('value');
+      const room = snap.val();
+      let deck = room.deck || [];
+
+      if (targetId === 'self') {
+        addLog(`${room.players[myPlayerId].name} used Flip 3 on themselves and drew 3 cards!`);
+        let myHand = room.players[myPlayerId].currentHand || [];
+        for (let i = 0; i < 3; i++) {
+          if (deck.length === 0) deck = createDeck();
+          let c = deck.pop();
+          myHand.push(c);
+          addLog(`...Flip 3 drew [${c.val !== undefined ? c.val : c.display}]`);
+        }
+        await roomRef.child(`players/${myPlayerId}`).update({
+          currentHand: myHand,
+          roundScore: calculateHandScore(myHand)
+        });
+      } else {
+        const targetPlayer = room.players[targetId];
+        addLog(`${room.players[myPlayerId].name} forced ${targetPlayer.name} to draw 3 cards with Flip 3!`);
+        let tHand = targetPlayer.currentHand || [];
+        for (let i = 0; i < 3; i++) {
+          if (deck.length === 0) deck = createDeck();
+          let c = deck.pop();
+          tHand.push(c);
+        }
+        await roomRef.child(`players/${targetId}`).update({
+          currentHand: tHand,
+          roundScore: calculateHandScore(tHand)
+        });
+      }
+
+      await roomRef.child('deck').set(deck);
+      await advanceTurn(room);
     }
 
     async function stayTurn() {
       const snap = await roomRef.once('value');
       const room = snap.val();
+      if (room.playerOrder[room.turnIndex] !== myPlayerId) return;
+
       const myHand = room.players[myPlayerId].currentHand || [];
-      
-      let roundScore = 0;
-      let multiplier = 1;
-
-      myHand.forEach(c => {
-        if (c.type === 'number') roundScore += c.val;
-        if (c.type === 'modifier') {
-          if (c.val === 'x2') multiplier *= 2;
-          else roundScore += parseInt(c.val);
-        }
-      });
-
-      roundScore *= multiplier;
+      const roundScore = calculateHandScore(myHand);
       const currentTotal = room.players[myPlayerId].totalScore || 0;
 
-      addLog(`${room.players[myPlayerId].name} STAYED and scored ${roundScore} pts!`);
+      addLog(`${room.players[myPlayerId].name} STAYED and locked in ${roundScore} pts!`);
 
       await roomRef.child(`players/${myPlayerId}`).update({
         totalScore: currentTotal + roundScore,
+        roundScore: roundScore,
         status: 'stayed'
       });
 
-      nextTurn(room);
+      await advanceTurn(room);
     }
 
-    async function nextTurn(room) {
+    async function advanceTurn(room) {
       const order = room.playerOrder;
-      let nextIdx = (room.turnIndex + 1) % order.length;
+      let nextIdx = room.turnIndex;
       
+      for (let i = 1; i <= order.length; i++) {
+        let idx = (room.turnIndex + i) % order.length;
+        if (room.players[order[idx]].status === 'playing') {
+          nextIdx = idx;
+          break;
+        }
+      }
+
       const snap = await roomRef.once('value');
       const players = snap.val().players;
       const activePlayers = Object.values(players).filter(p => p.status === 'playing');
 
       if (activePlayers.length === 0) {
         addLog("--- ROUND ENDED ---");
-        for (let pid in players) {
-          await roomRef.child(`players/${pid}`).update({ currentHand: [], status: 'playing' });
-        }
-        await roomRef.child('deck').set(createDeck());
+        setTimeout(async () => {
+          for (let pid in players) {
+            await roomRef.child(`players/${pid}`).update({ currentHand: [], status: 'playing', roundScore: 0 });
+          }
+          await roomRef.child('deck').set(createDeck());
+        }, 1500);
       }
 
       await roomRef.child('turnIndex').set(nextIdx);
+    }
+
+    function calculateHandScore(hand) {
+      let score = 0;
+      let multiplier = 1;
+      hand.forEach(c => {
+        if (c.type === 'number') score += c.val;
+        if (c.type === 'modifier') {
+          if (c.val === 'x2') multiplier *= 2;
+          else score += parseInt(c.val);
+        }
+      });
+      return score * multiplier;
     }
 
     async function addLog(msg) {
@@ -299,10 +492,16 @@
       await roomRef.child('logs').set(logs);
     }
 
+    function sortHand(hand) {
+      let numbers = hand.filter(c => c.type === 'number').sort((a, b) => a.val - b.val);
+      let others = hand.filter(c => c.type !== 'number');
+      return [...numbers, ...others];
+    }
+
     function renderRoom(room) {
       const isWaiting = room.state === 'waiting';
       document.getElementById('waiting-area').classList.toggle('hidden', !isWaiting);
-      document.getElementById('play-area').classList.toggle('hidden', isWaiting);
+      document.getElementById('play-area').classList.toggle('hidden', !isWaiting ? false : true);
 
       const isUserHost = room.host === myPlayerId;
 
@@ -319,27 +518,43 @@
         return;
       }
 
+      // Render Scoreboard
+      const scoreboardBody = document.getElementById('scoreboard-body');
+      scoreboardBody.innerHTML = Object.values(room.players || {}).map(p => `
+        <tr>
+          <td>${p.name}</td>
+          <td>${p.roundScore || 0}</td>
+          <td><strong>${p.totalScore || 0}</strong></td>
+        </tr>
+      `).join('');
+
       const activePlayerId = room.playerOrder[room.turnIndex];
       const isMyTurn = activePlayerId === myPlayerId && room.players[myPlayerId]?.status === 'playing';
 
-      document.getElementById('turn-indicator').textContent = isMyTurn ? "IT'S YOUR TURN!" : `Current Turn: ${room.players[activePlayerId]?.name || '-'}`;
+      document.getElementById('turn-indicator').textContent = isMyTurn ? "IT'S YOUR TURN (Draw 1 Card)!" : `Current Turn: ${room.players[activePlayerId]?.name || '-'}`;
       document.getElementById('my-action-controls').classList.toggle('hidden', !isMyTurn);
 
       const grid = document.getElementById('game-players-grid');
       grid.innerHTML = room.playerOrder.map(pid => {
         const p = room.players[pid];
         if (!p) return '';
-        const hand = p.currentHand || [];
+        const sortedHand = sortHand(p.currentHand || []);
         const isActive = pid === activePlayerId;
 
         return `
           <div class="player-card ${isActive ? 'active-turn' : ''} ${p.status === 'busted' ? 'busted' : ''} ${p.status === 'stayed' ? 'stayed' : ''}">
-            <div style="font-weight:bold; font-size:1.1rem; color:#f59e0b;">${p.name}</div>
-            <div style="font-size:0.85rem; color:#94a3b8; margin: 4px 0;">Total Points: <strong>${p.totalScore || 0}</strong></div>
-            <div style="font-size:0.75rem; color:#4ade80;">STATUS: ${(p.status || 'playing').toUpperCase()}</div>
-            <div class="cards-flex">
-              ${hand.map(c => `<div class="game-card ${c.type}">${c.val}</div>`).join('')}
+            <div>
+              <div style="font-weight:bold; font-size:1.1rem; color:#f59e0b;">${p.name}</div>
+              <div style="font-size:0.75rem; color:#cbd5e1; margin-top: 2px;">STATUS: ${p.status.toUpperCase()}</div>
             </div>
+            <div class="cards-flex">
+              ${sortedHand.map(c => `
+                <div class="game-card ${c.type}">
+                  ${c.type === 'number' ? c.val : c.type === 'modifier' ? c.val : c.type === 'second-chance' ? '🛡️' : c.display}
+                </div>
+              `).join('')}
+            </div>
+            <div style="font-size:0.8rem; color:#94a3b8; margin-top:8px;">Round Pts: <strong>${p.roundScore || 0}</strong></div>
           </div>
         `;
       }).join('');
