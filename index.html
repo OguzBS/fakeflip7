@@ -59,7 +59,7 @@
     <!-- LOBBY SCREEN -->
     <div id="lobby-screen" class="card-box">
       <h1>FLIP 7</h1>
-      <p class="sub">Online Multiplayer</p>
+      <p class="sub">Online Multiplayer (First to 200 pts wins!)</p>
       
       <form onsubmit="handleEnterRoom(event)">
         <label for="username">Your Nickname</label>
@@ -98,7 +98,7 @@
       <div id="play-area" class="hidden">
         <!-- SCOREBOARD -->
         <div class="scoreboard">
-          <h3 style="font-size: 0.95rem; margin-bottom: 8px; color: #cbd5e1;">GAME SCOREBOARD</h3>
+          <h3 style="font-size: 0.95rem; margin-bottom: 8px; color: #cbd5e1;">GAME SCOREBOARD (Target: 200 pts)</h3>
           <table>
             <thead>
               <tr><th>Player</th><th>Round Score</th><th>Total Game Points</th></tr>
@@ -109,6 +109,16 @@
 
         <div style="text-align:center; margin-bottom:16px;">
           <h3 id="turn-indicator" style="color:#f59e0b; font-size:1.3rem;">Current Turn: -</h3>
+        </div>
+
+        <!-- ROUND END / HOST START NEXT ROUND PANEL -->
+        <div id="round-end-panel" class="card-box hidden" style="margin-bottom: 16px; text-align: center; background: #0f172a; border: 2px dashed #f59e0b;">
+          <h3 id="round-end-title" style="color: #f59e0b; margin-bottom: 8px;">Round Concluded!</h3>
+          <p id="round-end-msg" style="color: #94a3b8; margin-bottom: 14px; font-size: 0.9rem;">All players have finished this round.</p>
+          <div id="host-next-round-container" class="hidden">
+            <button id="next-round-btn" onclick="startNextRound()" style="background: #10b981; color: #fff; max-width: 300px; margin: 0 auto;">START NEXT ROUND</button>
+          </div>
+          <p id="guest-next-round-msg" style="color: #94a3b8; font-size: 0.85rem;" class="hidden">Waiting for the host to continue...</p>
         </div>
 
         <div id="game-players-grid" class="players-grid"></div>
@@ -235,96 +245,184 @@
       await roomRef.update({
         state: 'playing',
         deck: deck,
+        discardPile: [],
         playerOrder: playerIds,
         turnIndex: 0,
-        logs: [`Game started by Host!`]
+        winner: null,
+        logs: [`Game started by Host! First to 200 points wins!`]
       });
 
       for (let pid of playerIds) {
-        await roomRef.child(`players/${pid}`).update({ currentHand: [], roundScore: 0, status: 'playing' });
+        await roomRef.child(`players/${pid}`).update({ totalScore: 0, currentHand: [], roundScore: 0, status: 'playing' });
       }
+    }
+
+    async function startNextRound() {
+      const snap = await roomRef.once('value');
+      const room = snap.val();
+      if (!room || room.host !== myPlayerId) return;
+
+      let deck = room.deck || [];
+      let discard = room.discardPile || [];
+
+      // Collect all cards from player hands into discard pile before reset
+      for (let pid in room.players || {}) {
+        let hand = room.players[pid].currentHand || [];
+        discard.push(...hand);
+      }
+
+      // If main deck is low/empty, shuffle discard pile back into deck
+      if (deck.length === 0) {
+        if (discard.length > 0) {
+          deck = discard.sort(() => Math.random() - 0.5);
+          discard = [];
+          addLog("Main deck finished! Shuffling discard pile back into main deck.");
+        } else {
+          deck = createDeck();
+          discard = [];
+        }
+      }
+
+      const playerIds = room.playerOrder || Object.keys(room.players || {});
+
+      const updates = {
+        state: 'playing',
+        deck: deck,
+        discardPile: discard,
+        turnIndex: 0,
+        logs: [`--- NEW ROUND STARTED ---`, ...(room.logs || [])]
+      };
+
+      for (let pid of playerIds) {
+        updates[`players/${pid}/currentHand`] = [];
+        updates[`players/${pid}/roundScore`] = 0;
+        updates[`players/${pid}/status`] = 'playing';
+      }
+
+      await roomRef.update(updates);
+    }
+
+    // Pull a card safely, managing deck depletion and discard pile mixing
+    async function pullCard(room) {
+      let deck = room.deck || [];
+      let discard = room.discardPile || [];
+
+      if (deck.length === 0) {
+        if (discard.length > 0) {
+          deck = discard.sort(() => Math.random() - 0.5);
+          discard = [];
+          addLog("Main deck finished! Shuffling discard pile back into main deck.");
+        } else {
+          deck = createDeck();
+          discard = [];
+          addLog("Both deck and discard empty. Generating fresh deck.");
+        }
+      }
+
+      const card = deck.pop();
+      await roomRef.update({ deck: deck, discardPile: discard });
+      return card;
+    }
+
+    async function processDrawnCard(room, targetPid, card) {
+      let targetPlayer = room.players[targetPid];
+      let hand = targetPlayer.currentHand || [];
+
+      // 1. Number Card Evaluation
+      if (card.type === 'number') {
+        const hasDuplicate = hand.some(c => c.type === 'number' && c.val === card.val);
+        if (hasDuplicate) {
+          const scIndex = hand.findIndex(c => c.type === 'second-chance');
+          if (scIndex !== -1) {
+            hand.splice(scIndex, 1);
+            hand.push(card);
+            addLog(`${targetPlayer.name} hit duplicate ${card.val} but was saved by SECOND CHANCE!`);
+            await roomRef.child(`players/${targetPid}`).update({ currentHand: hand });
+            return { busted: false, actionDrawn: null };
+          } else {
+            hand.push(card);
+            addLog(`${targetPlayer.name} hit duplicate ${card.val} and BUSTED!`);
+            await roomRef.child(`players/${targetPid}`).update({ currentHand: hand, status: 'busted', roundScore: 0 });
+            return { busted: true, actionDrawn: null };
+          }
+        }
+
+        // Check Flip 7 condition (7 unique numbers)
+        const uniqueNumbers = new Set(hand.filter(c => c.type === 'number').map(c => c.val));
+        uniqueNumbers.add(card.val);
+        if (uniqueNumbers.size >= 7) {
+          hand.push(card);
+          let roundScore = calculateHandScore(hand) + 15;
+          let newTotal = (targetPlayer.totalScore || 0) + roundScore;
+          
+          addLog(`${targetPlayer.name} hit FLIP 7! Bonus +15 points awarded!`);
+          
+          let updateData = {
+            currentHand: hand,
+            totalScore: newTotal,
+            roundScore: roundScore,
+            status: 'stayed'
+          };
+
+          // Check Win Condition (200 pts)
+          if (newTotal >= 200) {
+            updateData.status = 'won';
+          }
+
+          await roomRef.child(`players/${targetPid}`).update(updateData);
+          if (newTotal >= 200) {
+            await roomRef.update({ state: 'game_over', winner: targetPlayer.name });
+          }
+
+          return { busted: false, stayed: true, actionDrawn: null };
+        }
+      }
+
+      hand.push(card);
+      let roundScore = calculateHandScore(hand);
+
+      await roomRef.child(`players/${targetPid}`).update({
+        currentHand: hand,
+        roundScore: roundScore
+      });
+
+      if (card.type === 'action') {
+        return { busted: false, actionDrawn: card, cardName: card.val };
+      }
+
+      return { busted: false, actionDrawn: null };
     }
 
     async function hitCard() {
       const snap = await roomRef.once('value');
       const room = snap.val();
-      if (room.playerOrder[room.turnIndex] !== myPlayerId) return;
+      if (room.state !== 'playing' || room.playerOrder[room.turnIndex] !== myPlayerId) return;
 
-      let deck = room.deck || [];
-      if (deck.length === 0) deck = createDeck();
-      const card = deck.pop();
+      const card = await pullCard(room);
+      const freshSnap = await roomRef.once('value');
+      const result = await processDrawnCard(freshSnap.val(), myPlayerId, card);
 
-      let myHand = room.players[myPlayerId].currentHand || [];
-
-      // 1. Handle Number Card & Bust / Flip 7 Check
-      if (card.type === 'number') {
-        const hasDuplicate = myHand.some(c => c.type === 'number' && c.val === card.val);
-        if (hasDuplicate) {
-          const scIndex = myHand.findIndex(c => c.type === 'second-chance');
-          if (scIndex !== -1) {
-            myHand.splice(scIndex, 1);
-            myHand.push(card);
-            addLog(`${room.players[myPlayerId].name} hit duplicate ${card.val} but was saved by SECOND CHANCE!`);
-            await roomRef.child(`players/${myPlayerId}`).update({ currentHand: myHand });
-            await roomRef.child('deck').set(deck);
-            await advanceTurn(room);
-            return;
-          } else {
-            myHand.push(card);
-            addLog(`${room.players[myPlayerId].name} hit duplicate ${card.val} and BUSTED!`);
-            await roomRef.child(`players/${myPlayerId}`).update({ currentHand: myHand, status: 'busted', roundScore: 0 });
-            await roomRef.child('deck').set(deck);
-            await advanceTurn(room);
-            return;
-          }
+      if (result.busted || result.stayed) {
+        if (freshSnap.val().state !== 'game_over') {
+          await advanceTurn(freshSnap.val());
         }
+        return;
+      }
 
-        // Check for Flip 7 bonus condition (7 unique numbers)
-        const uniqueNumbers = new Set(myHand.filter(c => c.type === 'number').map(c => c.val));
-        uniqueNumbers.add(card.val);
-        if (uniqueNumbers.size >= 7) {
-          myHand.push(card);
-          let roundScore = calculateHandScore(myHand) + 15; // Flip 7 Bonus (+15 pts)
-          const currentTotal = room.players[myPlayerId].totalScore || 0;
-          addLog(`${room.players[myPlayerId].name} hit FLIP 7! Bonus +15 points awarded!`);
-          await roomRef.child(`players/${myPlayerId}`).update({
-            currentHand: myHand,
-            totalScore: currentTotal + roundScore,
-            roundScore: roundScore,
-            status: 'stayed'
-          });
-          await roomRef.child('deck').set(deck);
-          await advanceTurn(room);
+      if (result.actionDrawn) {
+        if (result.cardName === 'FREEZE') {
+          showFreezeModal(freshSnap.val());
+          return;
+        } else if (result.cardName === 'FLIP3') {
+          showFlip3Modal(freshSnap.val(), myPlayerId);
           return;
         }
       }
 
-      // 2. Handle Action Cards with choices
-      if (card.type === 'action') {
-        myHand.push(card);
-        await roomRef.child(`players/${myPlayerId}`).update({ currentHand: myHand });
-        await roomRef.child('deck').set(deck);
-
-        if (card.val === 'FREEZE') {
-          showFreezeModal(room);
-          return;
-        } else if (card.val === 'FLIP3') {
-          showFlip3Modal(room);
-          return;
-        }
-      } else {
-        myHand.push(card);
-        addLog(`${room.players[myPlayerId].name} drew [${card.val !== undefined ? card.val : card.display}]`);
+      const postSnap = await roomRef.once('value');
+      if (postSnap.val().state !== 'game_over') {
+        await advanceTurn(postSnap.val());
       }
-
-      let currentRoundScore = calculateHandScore(myHand);
-      await roomRef.child(`players/${myPlayerId}`).update({
-        currentHand: myHand,
-        roundScore: currentRoundScore
-      });
-      await roomRef.child('deck').set(deck);
-
-      await advanceTurn(room);
     }
 
     function showFreezeModal(room) {
@@ -361,36 +459,49 @@
       const targetPlayer = room.players[targetId];
 
       let tScore = calculateHandScore(targetPlayer.currentHand || []);
+      let newTotal = (targetPlayer.totalScore || 0) + tScore;
       addLog(`${room.players[myPlayerId].name} froze ${targetPlayer.name}, forcing them to stay with ${tScore} points!`);
 
-      await roomRef.child(`players/${targetId}`).update({
-        totalScore: (targetPlayer.totalScore || 0) + tScore,
+      let updateData = {
+        totalScore: newTotal,
         roundScore: tScore,
         status: 'stayed'
-      });
+      };
+
+      if (newTotal >= 200) {
+        updateData.status = 'won';
+      }
+
+      await roomRef.child(`players/${targetId}`).update(updateData);
+
+      if (newTotal >= 200) {
+        await roomRef.update({ state: 'game_over', winner: targetPlayer.name });
+        return;
+      }
 
       await advanceTurn(room);
     }
 
-    function showFlip3Modal(room) {
+    function showFlip3Modal(room, beneficiaryId) {
       const modal = document.getElementById('action-modal');
       const title = document.getElementById('modal-title');
       const desc = document.getElementById('modal-desc');
       const btns = document.getElementById('modal-buttons');
 
+      const beneficiary = room.players[beneficiaryId];
       title.textContent = "3️⃣ Flip Three Action Card Drawn!";
-      desc.textContent = "Choose how to use Flip 3:";
+      desc.textContent = `Choose how ${beneficiary.name} will use Flip 3:`;
 
       const activeOpponents = room.playerOrder
-        .filter(pid => pid !== myPlayerId && room.players[pid].status === 'playing')
+        .filter(pid => pid !== beneficiaryId && room.players[pid].status === 'playing')
         .map(pid => ({ id: pid, name: room.players[pid].name }));
 
-      let html = `<button onclick="resolveFlip3('self')" style="background:#10b981; color:#fff;">Use on Yourself (Draw 3 Cards)</button>`;
+      let html = `<button onclick="resolveFlip3('${beneficiaryId}', 'self')" style="background:#10b981; color:#fff;">Draw 3 Cards for ${beneficiary.name}</button>`;
       
       if (activeOpponents.length > 0) {
         html += `<div style="margin-top:8px; font-size:0.8rem; color:#94a3b8;">Or force an opponent to draw 3 cards:</div>`;
         html += activeOpponents.map(op => `
-          <button onclick="resolveFlip3('${op.id}')" style="background:#ec4899; color:#fff; margin-top:6px;">Force ${op.name} to Draw 3</button>
+          <button onclick="resolveFlip3('${beneficiaryId}', '${op.id}')" style="background:#ec4899; color:#fff; margin-top:6px;">Force ${op.name} to Draw 3</button>
         `).join('');
       }
 
@@ -398,91 +509,105 @@
       modal.classList.remove('hidden');
     }
 
-    async function resolveFlip3(targetId) {
+    async function resolveFlip3(beneficiaryId, targetId) {
       document.getElementById('action-modal').classList.add('hidden');
       const snap = await roomRef.once('value');
       const room = snap.val();
-      let deck = room.deck || [];
+      const actualTargetId = targetId === 'self' ? beneficiaryId : targetId;
+      const targetPlayer = room.players[actualTargetId];
 
-      if (targetId === 'self') {
-        addLog(`${room.players[myPlayerId].name} used Flip 3 on themselves and drew 3 cards!`);
-        let myHand = room.players[myPlayerId].currentHand || [];
-        for (let i = 0; i < 3; i++) {
-          if (deck.length === 0) deck = createDeck();
-          let c = deck.pop();
-          myHand.push(c);
+      addLog(`${room.players[beneficiaryId].name} triggered Flip 3 for ${targetPlayer.name} to draw 3 cards!`);
+
+      let chainedFlip3Beneficiary = null;
+
+      for (let i = 0; i < 3; i++) {
+        let freshSnap = await roomRef.once('value');
+        let freshRoom = freshSnap.val();
+        if (freshRoom.state === 'game_over') break;
+
+        let currentTargetPlayer = freshRoom.players[actualTargetId];
+        if (!currentTargetPlayer || currentTargetPlayer.status !== 'playing') break;
+
+        const card = await pullCard(freshRoom);
+        let updatedSnap = await roomRef.once('value');
+        let res = await processDrawnCard(updatedSnap.val(), actualTargetId, card);
+
+        if (res.busted || res.stayed || updatedSnap.val().state === 'game_over') {
+          break;
         }
-        await roomRef.child(`players/${myPlayerId}`).update({
-          currentHand: myHand,
-          roundScore: calculateHandScore(myHand)
-        });
-      } else {
-        const targetPlayer = room.players[targetId];
-        addLog(`${room.players[myPlayerId].name} forced ${targetPlayer.name} to draw 3 cards with Flip 3!`);
-        let tHand = targetPlayer.currentHand || [];
-        for (let i = 0; i < 3; i++) {
-          if (deck.length === 0) deck = createDeck();
-          let c = deck.pop();
-          tHand.push(c);
+
+        if (res.actionDrawn && res.cardName === 'FLIP3') {
+          chainedFlip3Beneficiary = actualTargetId;
+          break;
         }
-        await roomRef.child(`players/${targetId}`).update({
-          currentHand: tHand,
-          roundScore: calculateHandScore(tHand)
-        });
       }
 
-      await roomRef.child('deck').set(deck);
-      await advanceTurn(room);
+      let finalSnap = await roomRef.once('value');
+      if (finalSnap.val().state === 'game_over') return;
+
+      if (chainedFlip3Beneficiary) {
+        showFlip3Modal(finalSnap.val(), chainedFlip3Beneficiary);
+        return;
+      }
+
+      await advanceTurn(finalSnap.val());
     }
 
     async function stayTurn() {
       const snap = await roomRef.once('value');
       const room = snap.val();
-      if (room.playerOrder[room.turnIndex] !== myPlayerId) return;
+      if (room.state !== 'playing' || room.playerOrder[room.turnIndex] !== myPlayerId) return;
 
       const myHand = room.players[myPlayerId].currentHand || [];
       const roundScore = calculateHandScore(myHand);
       const currentTotal = room.players[myPlayerId].totalScore || 0;
+      const newTotal = currentTotal + roundScore;
 
-      addLog(`${room.players[myPlayerId].name} STAYED and locked in ${roundScore} pts!`);
+      addLog(`${room.players[myPlayerId].name} STAYED and locked in ${roundScore} pts! (Total: ${newTotal})`);
 
-      await roomRef.child(`players/${myPlayerId}`).update({
-        totalScore: currentTotal + roundScore,
+      let updateData = {
+        totalScore: newTotal,
         roundScore: roundScore,
         status: 'stayed'
-      });
+      };
 
-      await advanceTurn(room);
+      if (newTotal >= 200) {
+        updateData.status = 'won';
+      }
+
+      await roomRef.child(`players/${myPlayerId}`).update(updateData);
+
+      if (newTotal >= 200) {
+        await roomRef.update({ state: 'game_over', winner: room.players[myPlayerId].name });
+        return;
+      }
+
+      const freshSnap = await roomRef.once('value');
+      await advanceTurn(freshSnap.val());
     }
 
     async function advanceTurn(room) {
+      if (room.state === 'game_over') return;
+
       const order = room.playerOrder;
       let nextIdx = room.turnIndex;
       
-      // Find the next active player with status 'playing'
-      let found = false;
       for (let i = 1; i <= order.length; i++) {
         let idx = (room.turnIndex + i) % order.length;
         if (room.players[order[idx]].status === 'playing') {
           nextIdx = idx;
-          found = true;
           break;
         }
       }
 
-      // Check if all players have finished (stayed or busted)
       const snap = await roomRef.once('value');
       const players = snap.val().players;
       const activePlayers = Object.values(players).filter(p => p.status === 'playing');
 
       if (activePlayers.length === 0) {
         addLog("--- ROUND ENDED ---");
-        setTimeout(async () => {
-          for (let pid in players) {
-            await roomRef.child(`players/${pid}`).update({ currentHand: [], status: 'playing', roundScore: 0 });
-          }
-          await roomRef.child('deck').set(createDeck());
-        }, 1500);
+        await roomRef.child('state').set('round_ended');
+        return;
       }
 
       await roomRef.child('turnIndex').set(nextIdx);
@@ -517,8 +642,14 @@
 
     function renderRoom(room) {
       const isWaiting = room.state === 'waiting';
+      const isRoundEnded = room.state === 'round_ended';
+      const isGameOver = room.state === 'game_over';
+
       document.getElementById('waiting-area').classList.toggle('hidden', !isWaiting);
       document.getElementById('play-area').classList.toggle('hidden', isWaiting);
+      
+      const roundEndPanel = document.getElementById('round-end-panel');
+      roundEndPanel.classList.toggle('hidden', !isRoundEnded && !isGameOver);
 
       const isUserHost = room.host === myPlayerId;
 
@@ -535,6 +666,20 @@
         return;
       }
 
+      if (isGameOver) {
+        document.getElementById('round-end-title').textContent = "🏆 GAME OVER! 🏆";
+        document.getElementById('round-end-msg').textContent = `${room.winner} reached 200 points and won the game!`;
+        document.getElementById('host-next-round-container').classList.toggle('hidden', !isUserHost);
+        document.getElementById('guest-next-round-msg').classList.toggle('hidden', isUserHost);
+        document.getElementById('next-round-btn').textContent = "RESTART GAME";
+      } else if (isRoundEnded) {
+        document.getElementById('round-end-title').textContent = "Round Concluded!";
+        document.getElementById('round-end-msg').textContent = "All players have finished this round.";
+        document.getElementById('host-next-round-container').classList.toggle('hidden', !isUserHost);
+        document.getElementById('guest-next-round-msg').classList.toggle('hidden', isUserHost);
+        document.getElementById('next-round-btn').textContent = "START NEXT ROUND";
+      }
+
       // Render Scoreboard
       const scoreboardBody = document.getElementById('scoreboard-body');
       scoreboardBody.innerHTML = Object.values(room.players || {}).map(p => `
@@ -546,9 +691,9 @@
       `).join('');
 
       const activePlayerId = room.playerOrder[room.turnIndex];
-      const isMyTurn = activePlayerId === myPlayerId && room.players[myPlayerId]?.status === 'playing';
+      const isMyTurn = !isRoundEnded && !isGameOver && activePlayerId === myPlayerId && room.players[myPlayerId]?.status === 'playing';
 
-      document.getElementById('turn-indicator').textContent = isMyTurn ? "IT'S YOUR TURN (Draw 1 Card)!" : `Current Turn: ${room.players[activePlayerId]?.name || '-'}`;
+      document.getElementById('turn-indicator').textContent = isGameOver ? "GAME OVER" : (isRoundEnded ? "ROUND CONCLUDED" : (isMyTurn ? "IT'S YOUR TURN (Draw 1 Card)!" : `Current Turn: ${room.players[activePlayerId]?.name || '-'}`));
       document.getElementById('my-action-controls').classList.toggle('hidden', !isMyTurn);
 
       const grid = document.getElementById('game-players-grid');
@@ -556,7 +701,7 @@
         const p = room.players[pid];
         if (!p) return '';
         const sortedHand = sortHand(p.currentHand || []);
-        const isActive = pid === activePlayerId;
+        const isActive = !isRoundEnded && !isGameOver && pid === activePlayerId;
 
         return `
           <div class="player-card ${isActive ? 'active-turn' : ''} ${p.status === 'busted' ? 'busted' : ''} ${p.status === 'stayed' ? 'stayed' : ''}">
