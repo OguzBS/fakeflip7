@@ -321,7 +321,23 @@
       return card;
     }
 
-    async function processDrawnCard(room, targetPid, card) {
+    // Synchronous helper to find the next active player index
+    function getNextTurnIndex(room, currentTurnIndex) {
+      const order = room.playerOrder;
+      const players = room.players;
+      
+      for (let i = 1; i <= order.length; i++) {
+        let idx = (currentTurnIndex + i) % order.length;
+        let pid = order[idx];
+        if (players[pid] && players[pid].status === 'playing') {
+          return idx;
+        }
+      }
+      return -1; // All players finished
+    }
+
+    // In-memory card processing to prevent Firebase asynchronous race conditions
+    function processDrawnCardInMemory(room, targetPid, card) {
       let targetPlayer = room.players[targetPid];
       let hand = targetPlayer.currentHand || [];
 
@@ -332,13 +348,13 @@
           if (scIndex !== -1) {
             hand.splice(scIndex, 1);
             hand.push(card);
-            addLog(`${targetPlayer.name} hit duplicate ${card.val} but was saved by SECOND CHANCE!`);
-            await roomRef.child(`players/${targetPid}`).update({ currentHand: hand });
+            targetPlayer.currentHand = hand;
             return { busted: false, actionDrawn: null };
           } else {
             hand.push(card);
-            addLog(`${targetPlayer.name} hit duplicate ${card.val} and BUSTED!`);
-            await roomRef.child(`players/${targetPid}`).update({ currentHand: hand, status: 'busted', roundScore: 0 });
+            targetPlayer.currentHand = hand;
+            targetPlayer.status = 'busted';
+            targetPlayer.roundScore = 0;
             return { busted: true, actionDrawn: null };
           }
         }
@@ -349,36 +365,18 @@
           hand.push(card);
           let roundScore = calculateHandScore(hand) + 15;
           let newTotal = (targetPlayer.totalScore || 0) + roundScore;
-          
-          addLog(`${targetPlayer.name} hit FLIP 7! Bonus +15 points awarded!`);
-          
-          let updateData = {
-            currentHand: hand,
-            totalScore: newTotal,
-            roundScore: roundScore,
-            status: 'stayed'
-          };
-
-          if (newTotal >= 200) {
-            updateData.status = 'won';
-          }
-
-          await roomRef.child(`players/${targetPid}`).update(updateData);
-          if (newTotal >= 200) {
-            await roomRef.update({ state: 'game_over', winner: targetPlayer.name });
-          }
-
+          targetPlayer.currentHand = hand;
+          targetPlayer.totalScore = newTotal;
+          targetPlayer.roundScore = roundScore;
+          targetPlayer.status = newTotal >= 200 ? 'won' : 'stayed';
           return { busted: false, stayed: true, actionDrawn: null };
         }
       }
 
       hand.push(card);
       let roundScore = calculateHandScore(hand);
-
-      await roomRef.child(`players/${targetPid}`).update({
-        currentHand: hand,
-        roundScore: roundScore
-      });
+      targetPlayer.currentHand = hand;
+      targetPlayer.roundScore = roundScore;
 
       if (card.type === 'action') {
         return { busted: false, actionDrawn: card, cardName: card.val };
@@ -390,33 +388,61 @@
     async function hitCard() {
       const snap = await roomRef.once('value');
       const room = snap.val();
-      if (room.state !== 'playing' || room.playerOrder[room.turnIndex] !== myPlayerId) return;
+      if (!room || room.state !== 'playing' || room.playerOrder[room.turnIndex] !== myPlayerId) return;
 
       const card = await pullCard(room);
       const freshSnap = await roomRef.once('value');
-      const result = await processDrawnCard(freshSnap.val(), myPlayerId, card);
+      let freshRoom = freshSnap.val();
+
+      let result = processDrawnCardInMemory(freshRoom, myPlayerId, card);
+
+      let updates = {};
+      updates[`players/${myPlayerId}/currentHand`] = freshRoom.players[myPlayerId].currentHand;
+      updates[`players/${myPlayerId}/roundScore`] = freshRoom.players[myPlayerId].roundScore;
+      updates[`players/${myPlayerId}/status`] = freshRoom.players[myPlayerId].status;
+      updates[`players/${myPlayerId}/totalScore`] = freshRoom.players[myPlayerId].totalScore;
+
+      if (freshRoom.players[myPlayerId].status === 'won') {
+        updates['state'] = 'game_over';
+        updates['winner'] = freshRoom.players[myPlayerId].name;
+        await roomRef.update(updates);
+        addLog(`${freshRoom.players[myPlayerId].name} won the game by reaching 200 points!`);
+        return;
+      }
 
       if (result.busted || result.stayed) {
-        if (freshSnap.val().state !== 'game_over') {
-          await advanceTurn();
+        addLog(`${freshRoom.players[myPlayerId].name} ${result.busted ? 'BUSTED' : 'hit FLIP 7 and STAYED'}!`);
+        let nextIdx = getNextTurnIndex(freshRoom, freshRoom.turnIndex);
+        if (nextIdx === -1) {
+          updates['state'] = 'round_ended';
+        } else {
+          updates['turnIndex'] = nextIdx;
         }
+        await roomRef.update(updates);
         return;
       }
 
       if (result.actionDrawn) {
+        await roomRef.update(updates);
         if (result.cardName === 'FREEZE') {
-          showFreezeModal(freshSnap.val());
+          addLog(`${freshRoom.players[myPlayerId].name} drew FREEZE!`);
+          showFreezeModal(freshRoom);
           return;
         } else if (result.cardName === 'FLIP3') {
-          showFlip3Modal(freshSnap.val(), myPlayerId);
+          addLog(`${freshRoom.players[myPlayerId].name} drew FLIP 3!`);
+          showFlip3Modal(freshRoom, myPlayerId);
           return;
         }
       }
 
-      const postSnap = await roomRef.once('value');
-      if (postSnap.val().state !== 'game_over') {
-        await advanceTurn();
+      let nextIdx = getNextTurnIndex(freshRoom, freshRoom.turnIndex);
+      if (nextIdx === -1) {
+        updates['state'] = 'round_ended';
+      } else {
+        updates['turnIndex'] = nextIdx;
       }
+      addLog(`${freshRoom.players[myPlayerId].name} drew [${card.val !== undefined ? card.val : card.display}]`);
+      await roomRef.update(updates);
     }
 
     function showFreezeModal(room) {
@@ -435,7 +461,7 @@
       if (activeOpponents.length === 0) {
         modal.classList.add('hidden');
         addLog(`${room.players[myPlayerId].name} drew Freeze, but no opponents available to freeze.`);
-        advanceTurn();
+        advanceTurnWithoutDraw();
         return;
       }
 
@@ -456,24 +482,31 @@
       let newTotal = (targetPlayer.totalScore || 0) + tScore;
       addLog(`${room.players[myPlayerId].name} froze ${targetPlayer.name}, forcing them to stay with ${tScore} points!`);
 
-      let updateData = {
-        totalScore: newTotal,
-        roundScore: tScore,
-        status: 'stayed'
-      };
+      room.players[targetId].totalScore = newTotal;
+      room.players[targetId].roundScore = tScore;
+      room.players[targetId].status = newTotal >= 200 ? 'won' : 'stayed';
+
+      let updates = {};
+      updates[`players/${targetId}/totalScore`] = newTotal;
+      updates[`players/${targetId}/roundScore`] = tScore;
+      updates[`players/${targetId}/status`] = room.players[targetId].status;
 
       if (newTotal >= 200) {
-        updateData.status = 'won';
-      }
-
-      await roomRef.child(`players/${targetId}`).update(updateData);
-
-      if (newTotal >= 200) {
-        await roomRef.update({ state: 'game_over', winner: targetPlayer.name });
+        updates['state'] = 'game_over';
+        updates['winner'] = targetPlayer.name;
+        await roomRef.update(updates);
         return;
       }
 
-      await advanceTurn();
+      // Atomically calculate next turn index after freezing target
+      let nextIdx = getNextTurnIndex(room, room.turnIndex);
+      if (nextIdx === -1) {
+        updates['state'] = 'round_ended';
+      } else {
+        updates['turnIndex'] = nextIdx;
+      }
+
+      await roomRef.update(updates);
     }
 
     function showFlip3Modal(room, beneficiaryId) {
@@ -508,9 +541,8 @@
       const snap = await roomRef.once('value');
       const room = snap.val();
       const actualTargetId = targetId === 'self' ? beneficiaryId : targetId;
-      const targetPlayer = room.players[actualTargetId];
 
-      addLog(`${room.players[beneficiaryId].name} triggered Flip 3 for ${targetPlayer.name} to draw 3 cards!`);
+      addLog(`${room.players[beneficiaryId].name} triggered Flip 3 for ${room.players[actualTargetId].name} to draw 3 cards!`);
 
       let chainedFlip3Beneficiary = null;
 
@@ -519,14 +551,31 @@
         let freshRoom = freshSnap.val();
         if (freshRoom.state === 'game_over') break;
 
-        let currentTargetPlayer = freshRoom.players[actualTargetId];
-        if (!currentTargetPlayer || currentTargetPlayer.status !== 'playing') break;
+        let targetPlayer = freshRoom.players[actualTargetId];
+        if (!targetPlayer || targetPlayer.status !== 'playing') break;
 
         const card = await pullCard(freshRoom);
         let updatedSnap = await roomRef.once('value');
-        let res = await processDrawnCard(updatedSnap.val(), actualTargetId, card);
+        let updatedRoom = updatedSnap.val();
 
-        if (res.busted || res.stayed || updatedSnap.val().state === 'game_over') {
+        let res = processDrawnCardInMemory(updatedRoom, actualTargetId, card);
+
+        let updates = {};
+        updates[`players/${actualTargetId}/currentHand`] = updatedRoom.players[actualTargetId].currentHand;
+        updates[`players/${actualTargetId}/roundScore`] = updatedRoom.players[actualTargetId].roundScore;
+        updates[`players/${actualTargetId}/status`] = updatedRoom.players[actualTargetId].status;
+        updates[`players/${actualTargetId}/totalScore`] = updatedRoom.players[actualTargetId].totalScore;
+
+        if (updatedRoom.players[actualTargetId].status === 'won') {
+          updates['state'] = 'game_over';
+          updates['winner'] = targetPlayer.name;
+          await roomRef.update(updates);
+          return;
+        }
+
+        await roomRef.update(updates);
+
+        if (res.busted || res.stayed) {
           break;
         }
 
@@ -537,20 +586,28 @@
       }
 
       let finalSnap = await roomRef.once('value');
-      if (finalSnap.val().state === 'game_over') return;
+      let finalRoom = finalSnap.val();
+      if (finalRoom.state === 'game_over') return;
 
       if (chainedFlip3Beneficiary) {
-        showFlip3Modal(finalSnap.val(), chainedFlip3Beneficiary);
+        showFlip3Modal(finalRoom, chainedFlip3Beneficiary);
         return;
       }
 
-      await advanceTurn();
+      let nextIdx = getNextTurnIndex(finalRoom, finalRoom.turnIndex);
+      let updates = {};
+      if (nextIdx === -1) {
+        updates['state'] = 'round_ended';
+      } else {
+        updates['turnIndex'] = nextIdx;
+      }
+      await roomRef.update(updates);
     }
 
     async function stayTurn() {
       const snap = await roomRef.once('value');
       const room = snap.val();
-      if (room.state !== 'playing' || room.playerOrder[room.turnIndex] !== myPlayerId) return;
+      if (!room || room.state !== 'playing' || room.playerOrder[room.turnIndex] !== myPlayerId) return;
 
       const myHand = room.players[myPlayerId].currentHand || [];
       const roundScore = calculateHandScore(myHand);
@@ -559,57 +616,45 @@
 
       addLog(`${room.players[myPlayerId].name} STAYED and locked in ${roundScore} pts! (Total: ${newTotal})`);
 
-      let updateData = {
-        totalScore: newTotal,
-        roundScore: roundScore,
-        status: 'stayed'
-      };
+      room.players[myPlayerId].totalScore = newTotal;
+      room.players[myPlayerId].roundScore = roundScore;
+      room.players[myPlayerId].status = newTotal >= 200 ? 'won' : 'stayed';
+
+      let updates = {};
+      updates[`players/${myPlayerId}/totalScore`] = newTotal;
+      updates[`players/${myPlayerId}/roundScore`] = roundScore;
+      updates[`players/${myPlayerId}/status`] = room.players[myPlayerId].status;
 
       if (newTotal >= 200) {
-        updateData.status = 'won';
-      }
-
-      await roomRef.child(`players/${myPlayerId}`).update(updateData);
-
-      if (newTotal >= 200) {
-        await roomRef.update({ state: 'game_over', winner: room.players[myPlayerId].name });
+        updates['state'] = 'game_over';
+        updates['winner'] = room.players[myPlayerId].name;
+        await roomRef.update(updates);
         return;
       }
 
-      await advanceTurn();
+      let nextIdx = getNextTurnIndex(room, room.turnIndex);
+      if (nextIdx === -1) {
+        updates['state'] = 'round_ended';
+      } else {
+        updates['turnIndex'] = nextIdx;
+      }
+
+      await roomRef.update(updates);
     }
 
-    // FIXED advanceTurn function to correctly skip frozen/stayed/busted players
-    async function advanceTurn() {
+    async function advanceTurnWithoutDraw() {
       const snap = await roomRef.once('value');
       const room = snap.val();
       if (!room || room.state !== 'playing') return;
 
-      const order = room.playerOrder;
-      const players = room.players;
-      
-      let nextIdx = room.turnIndex;
-      let found = false;
-
-      // Loop through player indices starting from the next position
-      for (let i = 1; i <= order.length; i++) {
-        let idx = (room.turnIndex + i) % order.length;
-        let pid = order[idx];
-        if (players[pid] && players[pid].status === 'playing') {
-          nextIdx = idx;
-          found = true;
-          break;
-        }
+      let nextIdx = getNextTurnIndex(room, room.turnIndex);
+      let updates = {};
+      if (nextIdx === -1) {
+        updates['state'] = 'round_ended';
+      } else {
+        updates['turnIndex'] = nextIdx;
       }
-
-      if (!found) {
-        // All active players have finished (stayed or busted)
-        addLog("--- ROUND ENDED ---");
-        await roomRef.child('state').set('round_ended');
-        return;
-      }
-
-      await roomRef.child('turnIndex').set(nextIdx);
+      await roomRef.update(updates);
     }
 
     function calculateHandScore(hand) {
