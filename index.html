@@ -262,9 +262,15 @@
     import { getFirestore, doc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'flip7-live-app';
-    const firebaseConfig = typeof __firebase_config !== 'undefined' 
-      ? JSON.parse(__firebase_config) 
-      : null;
+    const firebaseConfig = {
+  apiKey: "AIzaSyDueZlgNd4RwI2tkgxl_v0VSFXE9OYRjLc",
+  authDomain: "fakeflip7.firebaseapp.com",
+  projectId: "fakeflip7",
+  storageBucket: "fakeflip7.firebasestorage.app",
+  messagingSenderId: "464906617088",
+  appId: "1:464906617088:web:ad8dedfb5d350a6cd273e5"
+};
+
 
     let app = null;
     let auth = null;
