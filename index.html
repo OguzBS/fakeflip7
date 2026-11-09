@@ -1,269 +1,90 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-slate-950 text-slate-100 font-sans antialiased">
+<html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Flip 7 - Real-Time Online Multiplayer</title>
-
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
-  <!-- Canvas Confetti -->
-  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-
-  <!-- Firebase Compat SDKs -->
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
-
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flip 7 Multiplayer</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@700;800;900&display=swap');
-
-    body {
-      font-family: 'Plus Jakarta Sans', sans-serif;
-    }
-    .font-display {
-      font-family: 'Outfit', sans-serif;
-    }
-
-    ::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-    ::-webkit-scrollbar-track {
-      background: rgba(15, 23, 42, 0.6);
-    }
-    ::-webkit-scrollbar-thumb {
-      background: rgba(51, 65, 85, 0.8);
-      border-radius: 9999px;
-    }
-
-    @keyframes pulse-gold {
-      0%, 100% { box-shadow: 0 0 15px rgba(234, 179, 8, 0.4), inset 0 0 8px rgba(234, 179, 8, 0.2); }
-      50% { box-shadow: 0 0 30px rgba(234, 179, 8, 0.85), inset 0 0 15px rgba(234, 179, 8, 0.5); }
-    }
-    .active-turn-glow {
-      animation: pulse-gold 2s infinite ease-in-out;
-    }
-
-    @keyframes draw-card-anim {
-      0% { opacity: 0; transform: translateY(-30px) scale(0.85); }
-      100% { opacity: 1; transform: translateY(0) scale(1); }
-    }
-    .animate-draw {
-      animation: draw-card-anim 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #0f172a; color: #f8fafc; display: flex; flex-direction: column; min-height: 100vh; padding: 16px; }
+    .container { max-width: 600px; margin: 0 auto; width: 100%; }
+    .card-box { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 24px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); }
+    h1 { color: #f59e0b; text-align: center; margin-bottom: 8px; font-size: 2rem; font-weight: 800; }
+    p.sub { text-align: center; color: #94a3b8; margin-bottom: 24px; font-size: 0.9rem; }
+    label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: #cbd5e1; font-weight: 600; text-transform: uppercase; }
+    input { width: 100%; padding: 12px; background: #0f172a; border: 1px solid #475569; border-radius: 8px; color: #fff; font-size: 1rem; margin-bottom: 16px; }
+    input:focus { outline: none; border-color: #f59e0b; }
+    button { width: 100%; padding: 14px; background: #f59e0b; border: none; border-radius: 8px; color: #0f172a; font-weight: 700; font-size: 1rem; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #d97706; }
+    button:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; }
+    .debug-terminal { margin-top: 24px; background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.75rem; color: #38bdf8; max-height: 180px; overflow-y: auto; }
+    .debug-line { margin-bottom: 4px; word-break: break-all; }
+    .debug-err { color: #f87171; font-weight: bold; }
+    .debug-success { color: #4ade80; font-weight: bold; }
+    .hidden { display: none !important; }
+    .game-header { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
+    .btn-secondary { background: #334155; color: #fff; padding: 8px 16px; font-size: 0.85rem; width: auto; }
   </style>
+
+  <!-- Firebase Compatibility Scripts -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 </head>
-<body class="h-full flex flex-col bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 selection:bg-amber-500 selection:text-slate-950">
+<body>
 
-  <!-- APP CONTAINER -->
-  <div id="app" class="h-full flex flex-col relative overflow-hidden">
-    
-    <!-- HEADER BAR -->
-    <header class="h-16 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md px-4 lg:px-8 flex items-center justify-between z-30 shrink-0">
-      <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-orange-500 to-red-500 flex items-center justify-center font-display font-black text-xl text-slate-950 shadow-lg shadow-amber-500/20">
-          F7
-        </div>
+  <div class="container">
+    <!-- LOBBY SCREEN -->
+    <div id="lobby-screen" class="card-box">
+      <h1>FLIP 7</h1>
+      <p class="sub">Online Realtime Multiplayer</p>
+      
+      <form id="join-form" onsubmit="handleEnterRoom(event)">
+        <label for="username">Your Nickname</label>
+        <input type="text" id="username" placeholder="e.g. Alex" required maxlength="12">
+
+        <label for="room-code">Room Code (or blank to auto-generate)</label>
+        <input type="text" id="room-code" placeholder="e.g. GAME1" maxlength="10">
+
+        <button type="submit" id="enter-btn">ENTER GAME ROOM</button>
+      </form>
+
+      <div class="debug-terminal" id="debug-log">
+        <div class="debug-line">[System Ready] Waiting for user input...</div>
+      </div>
+    </div>
+
+    <!-- GAME ROOM SCREEN -->
+    <div id="game-screen" class="card-box hidden">
+      <div class="game-header">
         <div>
-          <h1 class="font-display font-extrabold text-lg sm:text-xl tracking-tight text-white flex items-center gap-2">
-            FLIP 7 <span class="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold uppercase tracking-wider">Online</span>
-          </h1>
-          <p id="room-status-sub" class="text-xs text-slate-400 font-medium">Real-Time Multiplayer</p>
+          <span style="color:#94a3b8; font-size:0.8rem;">ROOM:</span>
+          <strong id="disp-room" style="color:#f59e0b; font-size:1.1rem;">-</strong>
         </div>
+        <button class="btn-secondary" onclick="copyInviteLink()">Copy Invite Link</button>
       </div>
 
-      <!-- Header Center Info -->
-      <div id="game-stats-header" class="hidden md:flex items-center gap-6 text-sm">
-        <div class="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
-          <i data-lucide="layers" class="w-4 h-4 text-amber-400"></i>
-          <span class="text-slate-400">Deck:</span>
-          <span id="deck-count-display" class="font-bold text-white">99</span>
-        </div>
-        <div class="bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2">
-          <i data-lucide="trophy" class="w-4 h-4 text-amber-400"></i>
-          <span class="text-slate-400">Target:</span>
-          <span class="font-bold text-amber-400">200 pts</span>
-        </div>
-      </div>
-
-      <!-- Header Right Controls -->
-      <div class="flex items-center gap-2">
-        <button id="btn-sound-toggle" onclick="toggleSound()" class="p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white transition border border-slate-800" title="Toggle Sound">
-          <i id="sound-icon" data-lucide="volume-2" class="w-5 h-5"></i>
-        </button>
-        <button id="btn-copy-link" onclick="copyRoomLink()" class="hidden px-3.5 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-semibold text-xs transition flex items-center gap-1.5">
-          <i data-lucide="share-2" class="w-4 h-4"></i>
-          <span class="hidden sm:inline">Invite Link</span>
-        </button>
-      </div>
-    </header>
-
-    <!-- MAIN VIEW -->
-    <main class="flex-1 relative overflow-hidden flex flex-col">
-
-      <!-- ================= SCREEN 1: LOBBY ENTRY ================= -->
-      <section id="screen-join" class="flex-1 flex items-center justify-center p-4 z-20">
-        <div class="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl space-y-6">
-          <div class="text-center space-y-2">
-            <div class="inline-flex p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl mb-1 text-amber-400">
-              <i data-lucide="users" class="w-8 h-8"></i>
-            </div>
-            <h2 class="font-display text-2xl font-black text-white">Online Game Lobby</h2>
-            <p class="text-slate-400 text-sm">Create or join a room to play Flip 7 live with friends.</p>
-          </div>
-
-          <div class="space-y-4">
-            <div>
-              <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Your Username</label>
-              <div class="relative">
-                <i data-lucide="user" class="w-5 h-5 absolute left-3.5 top-3.5 text-slate-500"></i>
-                <input type="text" id="input-username" maxlength="15" placeholder="e.g. Alex" 
-                       class="w-full pl-11 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition font-medium" />
-              </div>
-            </div>
-
-            <div>
-              <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Room Code</label>
-              <div class="relative">
-                <i data-lucide="hash" class="w-5 h-5 absolute left-3.5 top-3.5 text-slate-500"></i>
-                <input type="text" id="input-room-code" maxlength="8" placeholder="Auto-generated if empty" 
-                       class="w-full pl-11 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition font-mono font-bold uppercase tracking-wider" />
-              </div>
-            </div>
-
-            <div class="pt-2 flex flex-col gap-3">
-              <button onclick="handleJoinOrCreate()" class="w-full py-3.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold rounded-xl shadow-lg shadow-amber-500/20 transition transform active:scale-95 flex items-center justify-center gap-2 text-base">
-                <i data-lucide="play" class="w-5 h-5 fill-current"></i>
-                Enter Game Room
-              </button>
-            </div>
-          </div>
-
-          <div class="border-t border-slate-800/80 pt-4 text-center">
-            <button onclick="showRulesModal()" class="text-xs text-slate-400 hover:text-amber-400 font-semibold transition inline-flex items-center gap-1">
-              <i data-lucide="help-circle" class="w-4 h-4"></i> Official Flip 7 Rules
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- ================= SCREEN 2: GAME TABLE ================= -->
-      <section id="screen-game" class="hidden flex-1 flex flex-col md:flex-row overflow-hidden relative">
-
-        <!-- TABLE AREA -->
-        <div class="flex-1 flex flex-col overflow-y-auto p-4 md:p-6 space-y-6 relative">
-
-          <!-- TOP BAR: ROUND STATUS & TURN CONTROLS -->
-          <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 backdrop-blur-md flex flex-wrap items-center justify-between gap-4 shadow-lg shrink-0">
-            <div class="flex items-center gap-3">
-              <div id="status-badge" class="px-3 py-1.5 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-bold text-xs uppercase tracking-wider flex items-center gap-1.5">
-                <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
-                <span id="status-text">Waiting for Host...</span>
-              </div>
-              <div class="text-sm font-semibold text-slate-300">
-                Round <span id="round-number" class="text-white font-bold">1</span>
-              </div>
-            </div>
-
-            <!-- TURN CONTROLS -->
-            <div id="turn-controls" class="hidden flex items-center gap-3">
-              <button id="btn-hit" onclick="actionHit()" class="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl shadow-lg shadow-emerald-500/20 transition transform active:scale-95 flex items-center gap-1.5 text-sm uppercase tracking-wider">
-                <i data-lucide="plus-circle" class="w-4 h-4"></i> HIT CARD
-              </button>
-              <button id="btn-stay" onclick="actionStay()" class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-xl shadow-lg shadow-amber-500/20 transition transform active:scale-95 flex items-center gap-1.5 text-sm uppercase tracking-wider">
-                <i data-lucide="check-circle" class="w-4 h-4"></i> STAY & BANK
-              </button>
-            </div>
-
-            <!-- HOST START CONTROL -->
-            <div id="host-controls" class="hidden">
-              <button id="btn-host-action" onclick="hostStartOrNextRound()" class="px-5 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-extrabold rounded-xl shadow-lg shadow-indigo-500/20 transition transform active:scale-95 flex items-center gap-2 text-sm">
-                <i data-lucide="play" class="w-4 h-4 fill-current"></i>
-                <span id="host-action-text">Start Game</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- PLAYERS GRID AT TABLE -->
-          <div id="players-table" class="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-max pb-12">
-            <!-- Dynamic player hands rendered here -->
-          </div>
-        </div>
-
-        <!-- RIGHT SIDEBAR: LOG & CHAT -->
-        <div class="w-full md:w-80 border-t md:border-t-0 md:border-l border-slate-800 bg-slate-950/90 flex flex-col h-64 md:h-full shrink-0 z-20">
-          <div class="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
-            <h3 class="font-display text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-              <i data-lucide="message-square" class="w-4 h-4 text-amber-400"></i> Room Logs & Chat
-            </h3>
-            <span id="player-count-pill" class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-semibold">0 Players</span>
-          </div>
-
-          <!-- Log Messages -->
-          <div id="game-logs" class="flex-1 p-3 overflow-y-auto space-y-2 text-xs font-medium">
-            <div class="text-slate-500 italic text-center py-4">Welcome to Flip 7! Activity will appear here.</div>
-          </div>
-
-          <!-- Chat Input -->
-          <form onsubmit="sendChatMessage(event)" class="p-3 border-t border-slate-800 bg-slate-900/40 flex gap-2">
-            <input type="text" id="input-chat" placeholder="Send message..." maxlength="100" autocomplete="off"
-                   class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition" />
-            <button type="submit" class="p-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl transition">
-              <i data-lucide="send" class="w-4 h-4"></i>
-            </button>
-          </form>
-        </div>
-
-      </section>
-    </main>
-  </div>
-
-  <!-- ACTION TARGET MODAL -->
-  <div id="modal-target" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-center">
-      <div class="w-12 h-12 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-2xl flex items-center justify-center mx-auto">
-        <i data-lucide="zap" class="w-6 h-6"></i>
-      </div>
-      <div>
-        <h3 id="target-modal-title" class="font-display text-xl font-bold text-white">Select Action Target</h3>
-        <p id="target-modal-desc" class="text-slate-400 text-xs mt-1">Target another player with your action card:</p>
-      </div>
-      <div id="target-player-list" class="space-y-2 max-h-48 overflow-y-auto pt-2"></div>
-    </div>
-  </div>
-
-  <!-- RULES MODAL -->
-  <div id="modal-rules" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl overflow-y-auto max-h-[85vh]">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 class="font-display text-lg font-bold text-white flex items-center gap-2">
-          <i data-lucide="book-open" class="w-5 h-5 text-amber-400"></i> Official Flip 7 Rules
-        </h3>
-        <button onclick="hideRulesModal()" class="text-slate-400 hover:text-white p-1">
-          <i data-lucide="x" class="w-5 h-5"></i>
-        </button>
-      </div>
-      <div class="text-xs text-slate-300 space-y-3 leading-relaxed">
-        <p><strong class="text-amber-400">Objective:</strong> First player to reach <strong>200 total points</strong> wins the game!</p>
-        <p><strong class="text-white">Deck Breakdown (99 Cards Total):</strong>
-          <br/>• <strong>79 Number Cards (0-12):</strong> Count equals copies (1x 0, 1x 1, 2x 2 ... up to 12x 12).
-          <br/>• <strong>10 Modifier Cards:</strong> +2, +3, +4, +5, +6, +7, +8, +9, +10, and x2 multiplier.
-          <br/>• <strong>10 Action Cards:</strong> Freeze (x3), Flip Three (x3), Second Chance (x4).
-        </p>
-        <p><strong class="text-white">Player Turns:</strong> On your turn, choose to <strong>HIT</strong> (draw card) or <strong>STAY</strong> (lock points for the round).</p>
-        <p><strong class="text-red-400">Bust Rule:</strong> Drawing a duplicate number card busts your hand for 0 round points unless protected by Second Chance.</p>
-        <p><strong class="text-sky-400">Second Chance Shield:</strong> Discards the duplicate card and the Second Chance shield card upon duplicate draw, allowing you to stay in the round.</p>
-        <p><strong class="text-emerald-400">Flip 7 Bonus:</strong> Accumulating <strong>7 distinct number cards</strong> instantly ends the round and awards a <strong>+15 bonus point payout</strong>!</p>
+      <div style="text-align: center; padding: 32px 0;">
+        <h2 style="margin-bottom: 8px;">Connected to Room!</h2>
+        <p style="color: #94a3b8;" id="disp-player">Waiting for players...</p>
+        <div id="players-list" style="margin-top: 20px; text-align: left; background: #0f172a; padding: 16px; border-radius: 8px;"></div>
       </div>
     </div>
   </div>
 
-  <!-- FIREBASE ENGINE & GAME LOGIC -->
   <script>
-    // Initialize explicit user Firebase config
+    // 1. Logger Utility
+    function log(msg, type = 'info') {
+      const box = document.getElementById('debug-log');
+      if (!box) return;
+      const line = document.createElement('div');
+      line.className = 'debug-line ' + (type === 'err' ? 'debug-err' : type === 'success' ? 'debug-success' : '');
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      box.appendChild(line);
+      box.scrollTop = box.scrollHeight;
+      console.log(msg);
+    }
+
+    // 2. Firebase Config
     const firebaseConfig = {
       apiKey: "AIzaSyDueZlgNd4RwI2tkgxl_v0VSFXE9OYRjLc",
       authDomain: "fakeflip7.firebaseapp.com",
@@ -274,676 +95,135 @@
       appId: "1:464906617088:web:ad8dedfb5d350a6cd273e5"
     };
 
-    firebase.initializeApp(firebaseConfig);
-    const rtdb = firebase.database();
+    let db;
+    let myPlayerId = 'p_' + Math.random().toString(36).substring(2, 9);
+    let currentRoomCode = '';
 
-    // Audio SFX Synthesizer
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    let soundEnabled = true;
-
-    window.toggleSound = () => {
-      soundEnabled = !soundEnabled;
-      const icon = document.getElementById('sound-icon');
-      icon.setAttribute('data-lucide', soundEnabled ? 'volume-2' : 'volume-x');
-      lucide.createIcons();
-    };
-
-    function playSound(type) {
-      if (!soundEnabled || !audioCtx) return;
+    // 3. Init Firebase on Load
+    window.addEventListener('DOMContentLoaded', () => {
       try {
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        const now = audioCtx.currentTime;
-
-        if (type === 'card') {
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(350, now);
-          osc.frequency.exponentialRampToValueAtTime(700, now + 0.07);
-          gain.gain.setValueAtTime(0.15, now);
-          gain.gain.linearRampToValueAtTime(0.01, now + 0.07);
-          osc.start(now);
-          osc.stop(now + 0.07);
-        } else if (type === 'bust') {
-          osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(200, now);
-          osc.frequency.exponentialRampToValueAtTime(90, now + 0.35);
-          gain.gain.setValueAtTime(0.2, now);
-          gain.gain.linearRampToValueAtTime(0.01, now + 0.35);
-          osc.start(now);
-          osc.stop(now + 0.35);
-        } else if (type === 'stay') {
-          osc.type = 'triangle';
-          osc.frequency.setValueAtTime(300, now);
-          osc.frequency.setValueAtTime(450, now + 0.1);
-          gain.gain.setValueAtTime(0.15, now);
-          gain.gain.linearRampToValueAtTime(0.01, now + 0.2);
-          osc.start(now);
-          osc.stop(now + 0.2);
-        } else if (type === 'win') {
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(523.25, now);
-          osc.frequency.setValueAtTime(659.25, now + 0.1);
-          osc.frequency.setValueAtTime(783.99, now + 0.2);
-          gain.gain.setValueAtTime(0.2, now);
-          gain.gain.linearRampToValueAtTime(0.01, now + 0.45);
-          osc.start(now);
-          osc.stop(now + 0.45);
+        log("Initializing Firebase...");
+        if (!firebase.apps.length) {
+          firebase.initializeApp(firebaseConfig);
         }
-      } catch (e) {
-        console.error(e);
-      }
-    }
+        db = firebase.database();
+        log("Firebase initialized successfully!", "success");
 
-    // STATE VARIABLES
-    let currentUser = null;
-    let currentRoomCode = null;
-    let roomUnsubscribe = null;
-    let gameState = null;
-    let pendingActionCard = null;
-
-    function getOrCreateLocalUser() {
-      let localId = localStorage.getItem('flip7_user_id');
-      if (!localId) {
-        localId = 'user_' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
-        localStorage.setItem('flip7_user_id', localId);
-      }
-      return { uid: localId };
-    }
-
-    function initAuth() {
-      if (!currentUser) {
-        currentUser = getOrCreateLocalUser();
-      }
-      return currentUser;
-    }
-
-    // Official Flip 7 Deck Creation
-    function createFlip7Deck() {
-      const deck = [];
-      let id = 1;
-
-      // 0-12 Numbers (exact count according to rules: 79 number cards)
-      deck.push({ id: id++, type: 'number', value: 0, label: '0' });
-      for (let n = 1; n <= 12; n++) {
-        for (let c = 0; c < n; c++) {
-          deck.push({ id: id++, type: 'number', value: n, label: String(n) });
+        // Pre-fill room code from URL hash if present (#GAME123)
+        if (window.location.hash) {
+          const codeFromUrl = window.location.hash.substring(1).toUpperCase();
+          document.getElementById('room-code').value = codeFromUrl;
+          log("Detected room code from URL: " + codeFromUrl);
         }
+      } catch (err) {
+        log("Firebase Init Error: " + err.message, "err");
       }
+    });
 
-      // 10 Modifiers (+2 to +10 & x2)
-      const modifiers = [
-        { type: 'modifier', subtype: 'add', value: 2, label: '+2' },
-        { type: 'modifier', subtype: 'add', value: 3, label: '+3' },
-        { type: 'modifier', subtype: 'add', value: 4, label: '+4' },
-        { type: 'modifier', subtype: 'add', value: 5, label: '+5' },
-        { type: 'modifier', subtype: 'add', value: 6, label: '+6' },
-        { type: 'modifier', subtype: 'add', value: 7, label: '+7' },
-        { type: 'modifier', subtype: 'add', value: 8, label: '+8' },
-        { type: 'modifier', subtype: 'add', value: 9, label: '+9' },
-        { type: 'modifier', subtype: 'add', value: 10, label: '+10' },
-        { type: 'modifier', subtype: 'mult', value: 2, label: 'x2' }
-      ];
-      modifiers.forEach(m => deck.push({ id: id++, ...m }));
-
-      // 10 Action Cards (Freeze x3, Flip Three x3, Second Chance x4)
-      for (let i = 0; i < 3; i++) {
-        deck.push({ id: id++, type: 'action', action: 'Freeze', label: 'Freeze' });
-        deck.push({ id: id++, type: 'action', action: 'Flip Three', label: 'Flip Three' });
-      }
-      for (let i = 0; i < 4; i++) {
-        deck.push({ id: id++, type: 'action', action: 'Second Chance', label: 'Second Chance' });
-      }
-
-      // Fisher-Yates Shuffle
-      for (let i = deck.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [deck[i], deck[j]] = [deck[j], deck[i]];
-      }
-
-      return deck;
-    }
-
-    function calculatePlayerScore(playerHand) {
-      if (!playerHand || playerHand.status === 'busted') return 0;
+    // 4. Room Creation / Join Handler
+    async function handleEnterRoom(e) {
+      e.preventDefault();
       
-      const numberCards = playerHand.cards.filter(c => c.type === 'number');
-      let numberSum = numberCards.reduce((acc, c) => acc + c.value, 0);
+      const btn = document.getElementById('enter-btn');
+      const usernameInput = document.getElementById('username').value.trim();
+      let roomCodeInput = document.getElementById('room-code').value.trim().toUpperCase();
 
-      const addModifiers = playerHand.cards.filter(c => c.type === 'modifier' && c.subtype === 'add');
-      const addSum = addModifiers.reduce((acc, c) => acc + c.value, 0);
-
-      let total = numberSum + addSum;
-
-      const hasMult = playerHand.cards.some(c => c.type === 'modifier' && c.subtype === 'mult');
-      if (hasMult) {
-        total *= 2;
+      if (!usernameInput) {
+        alert("Please enter a nickname");
+        return;
       }
 
-      if (playerHand.flip7Bonus) {
-        total += 15;
+      if (!roomCodeInput) {
+        roomCodeInput = Math.random().toString(36).substring(2, 7).toUpperCase();
+        document.getElementById('room-code').value = roomCodeInput;
       }
 
-      return total;
-    }
-    function getRoomRef(code) {
-      return rtdb.ref('flip7_rooms/' + code.toUpperCase());
-    }
-
-    window.handleJoinOrCreate = async () => {
-      const btn = document.querySelector("button[onclick='handleJoinOrCreate()']");
-      if (btn) btn.disabled = true;
+      currentRoomCode = roomCodeInput;
+      btn.disabled = true;
+      btn.textContent = "CONNECTING...";
+      log(`Attempting to join room [${currentRoomCode}] as "${usernameInput}"...`);
 
       try {
-        const usernameInput = document.getElementById('input-username').value.trim();
-        let roomCodeInput = document.getElementById('input-room-code').value.trim().toUpperCase();
-
-        if (!usernameInput) {
-          alert("Please enter a username to play!");
-          if (btn) btn.disabled = false;
-          return;
-        }
-
-        initAuth();
-
-        if (!roomCodeInput) {
-          roomCodeInput = Math.random().toString(36).substring(2, 7).toUpperCase();
-        }
-
-        currentRoomCode = roomCodeInput;
-        window.location.hash = `room=${currentRoomCode}`;
-
-        const roomRef = getRoomRef(currentRoomCode);
-
-        // Add a 5-second timeout notice in case Realtime Database is unresponsive or blocked
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error("Connection timed out. Check your ad-blocker or Realtime DB location URL.")), 5000)
-        );
+        const roomRef = db.ref('flip7_rooms/' + currentRoomCode);
         
-        // Fetch snapshot once to create or join
-        const snapshot = await Promise.race([roomRef.once('value'), timeoutPromise]);
-        const data = snapshot.val();
+        // Timeout check if Firebase doesn't respond in 5s
+        const timeout = setTimeout(() => {
+          log("Connection timed out! Check your Firebase Realtime Database status.", "err");
+          alert("Could not connect to Firebase! Make sure 'Realtime Database' is created in test mode on Firebase Console.");
+          btn.disabled = false;
+          btn.textContent = "ENTER GAME ROOM";
+        }, 6000);
 
-        if (!data) {
-          await createNewRoom(roomRef, usernameInput);
-        } else {
-          await joinExistingRoom(data, usernameInput);
+        // Try reading room data
+        const snapshot = await roomRef.once('value');
+        clearTimeout(timeout);
+
+        log("Database responded!", "success");
+        let roomData = snapshot.val();
+
+        if (!roomData) {
+          log(`Room [${currentRoomCode}] doesn't exist. Creating new room...`);
+          roomData = {
+            createdAt: Date.now(),
+            host: myPlayerId,
+            state: 'lobby',
+            players: {}
+          };
         }
 
-        // Attach real-time listener for live updates
-        if (roomUnsubscribe) roomRef.off('value', roomUnsubscribe);
-        roomUnsubscribe = roomRef.on('value', (snap) => {
-          const val = snap.val();
-          if (val) {
-            gameState = val;
-            renderGameState();
-          }
-        }, (err) => {
-          console.error("Realtime sync error:", err);
-          alert("Sync error: " + err.message);
+        // Add player to room
+        roomData.players = roomData.players || {};
+        roomData.players[myPlayerId] = {
+          name: usernameInput,
+          score: 0,
+          joinedAt: Date.now()
+        };
+
+        // Save to Database
+        await roomRef.set(roomData);
+        log("Joined room successfully!", "success");
+
+        // Listen for real-time room changes
+        roomRef.on('value', (snap) => {
+          const updated = snap.val();
+          if (updated) renderRoomState(updated);
         });
 
-        // Switch to game screen
-        document.getElementById('screen-join').classList.add('hidden');
-        document.getElementById('screen-game').classList.remove('hidden');
-        document.getElementById('btn-copy-link').classList.remove('hidden');
-        document.getElementById('room-status-sub').textContent = `Room Code: ${currentRoomCode}`;
+        // Update UI
+        window.location.hash = currentRoomCode;
+        document.getElementById('lobby-screen').classList.add('hidden');
+        document.getElementById('game-screen').classList.remove('hidden');
+        document.getElementById('disp-room').textContent = currentRoomCode;
+        document.getElementById('disp-player').textContent = `Logged in as: ${usernameInput}`;
 
       } catch (err) {
-        console.error("Join room error:", err);
-        alert("Connection Error:\n" + err.message + "\n\n1. Ensure Realtime Database is created in Firebase Console.\n2. Verify databaseURL match.\n3. Check if an ad-blocker is active.");
-      } finally {
-        if (btn) btn.disabled = false;
-      }
-    };
-
-    async function createNewRoom(roomRef, username) {
-      const initialDeck = createFlip7Deck();
-      const newRoom = {
-        code: currentRoomCode,
-        status: 'lobby', // lobby, playing, ended
-        hostId: currentUser.uid,
-        round: 1,
-        turnIndex: 0,
-        playerOrder: [currentUser.uid],
-        deck: initialDeck,
-        discard: [],
-        logs: [`Room ${currentRoomCode} created by ${username}`],
-        players: {
-          [currentUser.uid]: {
-            id: currentUser.uid,
-            name: username,
-            totalScore: 0,
-            roundScore: 0,
-            status: 'active', // active, stayed, busted, frozen
-            cards: [],
-            flip7Bonus: false
-          }
-        }
-      };
-      await roomRef.set(newRoom);
-    }
-
-    async function joinExistingRoom(data, currentUsername) {
-      const roomRef = getRoomRef(currentRoomCode);
-      const players = data.players || {};
-      const playerOrder = data.playerOrder || [];
-
-      if (!players[currentUser.uid]) {
-        if (data.status !== 'lobby') {
-          alert("Game is currently in progress. You can watch or join next game!");
-        }
-        players[currentUser.uid] = {
-          id: currentUser.uid,
-          name: currentUsername,
-          totalScore: 0,
-          roundScore: 0,
-          status: 'active',
-          cards: [],
-          flip7Bonus: false
-        };
-        if (!playerOrder.includes(currentUser.uid)) {
-          playerOrder.push(currentUser.uid);
-        }
-        const updatedLogs = [...(data.logs || []), `${currentUsername} joined the room`].slice(-50);
-        await roomRef.update({
-          players: players,
-          playerOrder: playerOrder,
-          logs: updatedLogs
-        });
+        log("Firebase Read/Write Error: " + err.message, "err");
+        alert("Firebase Error: " + err.message);
+        btn.disabled = false;
+        btn.textContent = "ENTER GAME ROOM";
       }
     }
 
-    // GAME ACTIONS
-    window.hostStartOrNextRound = async () => {
-      if (!gameState || gameState.hostId !== currentUser.uid) return;
-      const roomRef = getRoomRef(currentRoomCode);
+    function renderRoomState(roomData) {
+      const listEl = document.getElementById('players-list');
+      if (!listEl || !roomData.players) return;
 
-      if (gameState.status === 'lobby' || gameState.status === 'ended') {
-        const deck = createFlip7Deck();
-        const updatedPlayers = {};
-        gameState.playerOrder.forEach(pid => {
-          if (gameState.players[pid]) {
-            updatedPlayers[pid] = {
-              ...gameState.players[pid],
-              roundScore: 0,
-              status: 'active',
-              cards: [],
-              flip7Bonus: false
-            };
-          }
-        });
+      const playersHtml = Object.entries(roomData.players).map(([id, p]) => `
+        <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #334155;">
+          <span>${p.name} ${id === myPlayerId ? '<strong>(You)</strong>' : ''}</span>
+          <span style="color:#f59e0b;">${id === roomData.host ? 'HOST' : 'READY'}</span>
+        </div>
+      `).join('');
 
-        await roomRef.update({
-          status: 'playing',
-          round: gameState.status === 'ended' ? 1 : gameState.round,
-          deck: deck,
-          discard: [],
-          turnIndex: 0,
-          players: updatedPlayers,
-          logs: [...(gameState.logs || []), `Round ${gameState.round} started!`].slice(-50)
-        });
-      }
-    };
+      listEl.innerHTML = `<h3 style="margin-bottom:12px; font-size:0.9rem; color:#94a3b8;">PLAYERS IN LOBBY (${Object.keys(roomData.players).length}):</h3>` + playersHtml;
+    }
 
-    window.actionHit = async () => {
-      if (!gameState || gameState.status !== 'playing') return;
-      const activePlayerId = gameState.playerOrder[gameState.turnIndex];
-      if (activePlayerId !== currentUser.uid) return;
-
-      const player = gameState.players[currentUser.uid];
-      if (!player || player.status !== 'active') return;
-
-      const roomRef = getRoomRef(currentRoomCode);
-      let deck = [...(gameState.deck || [])];
-      
-      if (deck.length === 0) {
-        deck = createFlip7Deck();
-      }
-
-      const drawnCard = deck.shift();
-      playSound('card');
-
-      const updatedCards = [...(player.cards || []), drawnCard];
-      let updatedStatus = player.status;
-      let logs = [...(gameState.logs || [])];
-      let flip7Bonus = player.flip7Bonus || false;
-
-      // Handle Action Card logic
-      if (drawnCard.type === 'action') {
-        if (drawnCard.action === 'Freeze') {
-          pendingActionCard = { type: 'Freeze', card: drawnCard };
-          showTargetModal('Freeze Player', 'Choose a player to freeze for the remainder of this round:');
-          return;
-        } else if (drawnCard.action === 'Flip Three') {
-          pendingActionCard = { type: 'Flip Three', card: drawnCard };
-          showTargetModal('Flip Three Cards', 'Choose a player who must draw 3 cards:');
-          return;
-        }
-      }
-
-      // Check duplicate number bust & Second Chance shield
-      if (drawnCard.type === 'number') {
-        const existingNumbers = updatedCards.filter(c => c.type === 'number');
-        const count = existingNumbers.filter(c => c.value === drawnCard.value).length;
-        
-        if (count > 1) {
-          const secondChanceIndex = updatedCards.findIndex(c => c.type === 'action' && c.action === 'Second Chance');
-          if (secondChanceIndex !== -1) {
-            // Protect with Second Chance shield
-            updatedCards.splice(secondChanceIndex, 1);
-            const drawnIndex = updatedCards.findIndex(c => c.id === drawnCard.id);
-            if (drawnIndex !== -1) updatedCards.splice(drawnIndex, 1);
-            logs.push(`${player.name}'s Second Chance saved them from drawing duplicate ${drawnCard.value}!`);
-          } else {
-            // Bust
-            updatedStatus = 'busted';
-            playSound('bust');
-            logs.push(`${player.name} drew duplicate ${drawnCard.value} and BUSTED!`);
-          }
-        }
-      }
-
-      // Check Flip 7 Bonus condition (7 unique numbers)
-      const uniqueNumbers = new Set(updatedCards.filter(c => c.type === 'number').map(c => c.value));
-      if (uniqueNumbers.size >= 7 && updatedStatus !== 'busted') {
-        flip7Bonus = true;
-        updatedStatus = 'stayed';
-        playSound('win');
-        logs.push(`🎉 ${player.name} got a FLIP 7! +15 Bonus points awarded!`);
-      }
-
-      const updatedPlayer = {
-        ...player,
-        cards: updatedCards,
-        status: updatedStatus,
-        flip7Bonus: flip7Bonus,
-        roundScore: updatedStatus === 'busted' ? 0 : calculatePlayerScore({ cards: updatedCards, status: updatedStatus, flip7Bonus: flip7Bonus })
-      };
-
-      const nextTurnIndex = getNextTurnIndex(gameState.turnIndex, gameState.playerOrder, { ...gameState.players, [currentUser.uid]: updatedPlayer });
-      
-      const updatePayload = {
-        deck: deck,
-        turnIndex: nextTurnIndex,
-        [`players/${currentUser.uid}`]: updatedPlayer,
-        logs: logs.slice(-50)
-      };
-
-      await roomRef.update(updatePayload);
-      checkRoundCompletion();
-    };
-
-    window.actionStay = async () => {
-      if (!gameState || gameState.status !== 'playing') return;
-      const activePlayerId = gameState.playerOrder[gameState.turnIndex];
-      if (activePlayerId !== currentUser.uid) return;
-
-      const player = gameState.players[currentUser.uid];
-      if (!player || player.status !== 'active') return;
-
-      playSound('stay');
-      const roomRef = getRoomRef(currentRoomCode);
-
-      const finalRoundScore = calculatePlayerScore(player);
-      const updatedPlayer = {
-        ...player,
-        status: 'stayed',
-        roundScore: finalRoundScore
-      };
-
-      const logs = [...(gameState.logs || []), `${player.name} STAYED with ${finalRoundScore} pts`].slice(-50);
-      const nextTurnIndex = getNextTurnIndex(gameState.turnIndex, gameState.playerOrder, { ...gameState.players, [currentUser.uid]: updatedPlayer });
-
-      await roomRef.update({
-        turnIndex: nextTurnIndex,
-        [`players/${currentUser.uid}`]: updatedPlayer,
-        logs: logs
+    function copyInviteLink() {
+      const url = window.location.origin + window.location.pathname + '#' + currentRoomCode;
+      navigator.clipboard.writeText(url).then(() => {
+        alert("Invite link copied to clipboard!\n" + url);
       });
-
-      checkRoundCompletion();
-    };
-
-    function getNextTurnIndex(currentIndex, order, players) {
-      const total = order.length;
-      for (let i = 1; i <= total; i++) {
-        const nextIdx = (currentIndex + i) % total;
-        const pid = order[nextIdx];
-        if (players[pid] && players[pid].status === 'active') {
-          return nextIdx;
-        }
-      }
-      return currentIndex;
     }
-
-    async function checkRoundCompletion() {
-      if (!gameState) return;
-      const playersArr = Object.values(gameState.players || {});
-      const activePlayers = playersArr.filter(p => p.status === 'active');
-
-      if (activePlayers.length === 0 && gameState.status === 'playing') {
-        const roomRef = getRoomRef(currentRoomCode);
-        const updatedPlayers = {};
-        let winnerName = null;
-        let maxScore = 0;
-
-        playersArr.forEach(p => {
-          const newTotal = (p.totalScore || 0) + (p.status === 'busted' ? 0 : (p.roundScore || 0));
-          updatedPlayers[p.id] = {
-            ...p,
-            totalScore: newTotal,
-            cards: [],
-            roundScore: 0,
-            status: 'active'
-          };
-
-          if (newTotal >= 200 && newTotal > maxScore) {
-            maxScore = newTotal;
-            winnerName = p.name;
-          }
-        });
-
-        const logs = [...(gameState.logs || []), `Round ${gameState.round} completed!`];
-        let gameStatus = 'lobby';
-
-        if (winnerName) {
-          gameStatus = 'ended';
-          logs.push(`🏆 ${winnerName} won the game with ${maxScore} points!`);
-          confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
-        }
-
-        await roomRef.update({
-          status: gameStatus,
-          round: gameState.round + 1,
-          players: updatedPlayers,
-          logs: logs.slice(-50)
-        });
-      }
-    }
-
-    // ACTION TARGET MODAL
-    function showTargetModal(title, desc) {
-      document.getElementById('target-modal-title').textContent = title;
-      document.getElementById('target-modal-desc').textContent = desc;
-      const listEl = document.getElementById('target-player-list');
-      listEl.innerHTML = '';
-
-      gameState.playerOrder.forEach(pid => {
-        const p = gameState.players[pid];
-        if (p && p.status === 'active') {
-          const btn = document.createElement('button');
-          btn.className = "w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs rounded-xl transition flex items-center justify-between border border-slate-700";
-          btn.innerHTML = `<span>${p.name}</span> <span class="text-slate-400 font-normal">${p.cards ? p.cards.length : 0} cards</span>`;
-          btn.onclick = () => handleTargetSelected(pid);
-          listEl.appendChild(btn);
-        }
-      });
-
-      document.getElementById('modal-target').classList.remove('hidden');
-    }
-
-    async function handleTargetSelected(targetId) {
-      document.getElementById('modal-target').classList.add('hidden');
-      if (!pendingActionCard || !gameState) return;
-
-      const roomRef = getRoomRef(currentRoomCode);
-      const targetPlayer = gameState.players[targetId];
-      const me = gameState.players[currentUser.uid];
-      const logs = [...(gameState.logs || [])];
-
-      if (pendingActionCard.type === 'Freeze') {
-        logs.push(`${me.name} froze ${targetPlayer.name}!`);
-        const updatedTarget = { ...targetPlayer, status: 'stayed' };
-        await roomRef.update({
-          [`players/${targetId}`]: updatedTarget,
-          logs: logs.slice(-50)
-        });
-      }
-
-      pendingActionCard = null;
-    }
-
-    // UI RENDER LOOP
-    function renderGameState() {
-      if (!gameState) return;
-
-      // Update Header Deck Count
-      const deckCount = gameState.deck ? gameState.deck.length : 0;
-      document.getElementById('deck-count-display').textContent = deckCount;
-      document.getElementById('round-number').textContent = gameState.round || 1;
-
-      // Update Controls Visibility
-      const isHost = gameState.hostId === currentUser.uid;
-      const activePlayerId = gameState.playerOrder[gameState.turnIndex];
-      const isMyTurn = activePlayerId === currentUser.uid && gameState.status === 'playing';
-
-      document.getElementById('turn-controls').classList.toggle('hidden', !isMyTurn);
-      document.getElementById('host-controls').classList.toggle('hidden', !isHost || gameState.status === 'playing');
-      
-      const hostBtnText = document.getElementById('host-action-text');
-      if (hostBtnText) {
-        hostBtnText.textContent = gameState.status === 'ended' ? 'Play Again' : 'Start Game';
-      }
-
-      // Render Table Status
-      const statusText = document.getElementById('status-text');
-      if (gameState.status === 'lobby') {
-        statusText.textContent = isHost ? "Ready to Start!" : "Waiting for Host to start...";
-      } else if (gameState.status === 'playing') {
-        const activeName = gameState.players[activePlayerId] ? gameState.players[activePlayerId].name : 'Someone';
-        statusText.textContent = isMyTurn ? "YOUR TURN!" : `${activeName}'s Turn...`;
-      } else if (gameState.status === 'ended') {
-        statusText.textContent = "Game Finished!";
-      }
-
-      // Render Players Card Table
-      const tableEl = document.getElementById('players-table');
-      tableEl.innerHTML = '';
-
-      gameState.playerOrder.forEach(pid => {
-        const p = gameState.players[pid];
-        if (!p) return;
-
-        const isCurrentTurn = pid === activePlayerId && gameState.status === 'playing';
-        const cardBox = document.createElement('div');
-        cardBox.className = `bg-slate-900/90 border ${isCurrentTurn ? 'border-amber-500/80 active-turn-glow' : 'border-slate-800'} rounded-2xl p-4 flex flex-col justify-between transition-all shadow-xl relative overflow-hidden`;
-
-        let statusBadge = `<span class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-bold uppercase">In Round</span>`;
-        if (p.status === 'busted') statusBadge = `<span class="px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-bold uppercase">Busted</span>`;
-        if (p.status === 'stayed') statusBadge = `<span class="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold uppercase">Stayed</span>`;
-
-        const cardsHTML = (p.cards || []).map(c => {
-          let bgClass = "bg-slate-800 text-white border-slate-700";
-          if (c.type === 'modifier') bgClass = "bg-indigo-900/40 text-indigo-300 border-indigo-700/50";
-          if (c.type === 'action') bgClass = "bg-amber-900/40 text-amber-300 border-amber-700/50";
-
-          return `
-            <div class="${bgClass} border rounded-xl px-2.5 py-3 text-center flex flex-col items-center justify-center font-display font-extrabold text-sm shadow-md animate-draw min-w-[42px]">
-              <span>${c.label}</span>
-            </div>
-          `;
-        }).join('');
-
-        cardBox.innerHTML = `
-          <div>
-            <div class="flex items-center justify-between mb-3 border-b border-slate-800/80 pb-2">
-              <div class="flex items-center gap-2">
-                <span class="font-bold text-white text-sm">${p.name}</span>
-                ${pid === currentUser.uid ? '<span class="text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded font-semibold">YOU</span>' : ''}
-              </div>
-              ${statusBadge}
-            </div>
-            <div class="flex flex-wrap gap-2 py-2 min-h-[64px]">
-              ${cardsHTML.length > 0 ? cardsHTML : '<span class="text-slate-600 text-xs italic">No cards drawn</span>'}
-            </div>
-          </div>
-          <div class="flex items-center justify-between border-t border-slate-800/80 pt-3 mt-3 text-xs">
-            <span class="text-slate-400">Round: <b class="text-amber-400 font-bold">${p.roundScore || 0}</b></span>
-            <span class="text-slate-400">Total: <b class="text-white font-bold">${p.totalScore || 0} pts</b></span>
-          </div>
-        `;
-        tableEl.appendChild(cardBox);
-      });
-
-      // Render Logs
-      const logsContainer = document.getElementById('game-logs');
-      logsContainer.innerHTML = '';
-      (gameState.logs || []).slice().reverse().forEach(log => {
-        const logRow = document.createElement('div');
-        logRow.className = "py-1 px-2 rounded bg-slate-900/50 text-slate-300 text-[11px] border border-slate-800/40";
-        logRow.textContent = log;
-        logsContainer.appendChild(logRow);
-      });
-
-      // Update Player Count Pill
-      const countPill = document.getElementById('player-count-pill');
-      if (countPill) {
-        countPill.textContent = `${gameState.playerOrder.length} Players`;
-      }
-    }
-
-    // CHAT SYSTEM
-    window.sendChatMessage = async (e) => {
-      e.preventDefault();
-      const input = document.getElementById('input-chat');
-      const text = input.value.trim();
-      if (!text || !gameState) return;
-
-      const roomRef = getRoomRef(currentRoomCode);
-      const me = gameState.players[currentUser.uid];
-      const logs = [...(gameState.logs || []), `${me ? me.name : 'Player'}: ${text}`].slice(-50);
-      
-      input.value = '';
-      await roomRef.update({ logs: logs });
-    };
-
-    // UTILITIES
-    window.copyRoomLink = () => {
-      const url = `${window.location.origin}${window.location.pathname}#room=${currentRoomCode}`;
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(() => alert("Room link copied to clipboard!"));
-      } else {
-        document.execCommand('copy');
-        alert(`Room Link:\n${url}`);
-      }
-    };
-
-    window.showRulesModal = () => document.getElementById('modal-rules').classList.remove('hidden');
-    window.hideRulesModal = () => document.getElementById('modal-rules').classList.add('hidden');
-
-    // AUTO PARSE URL HASH
-    window.onload = () => {
-      lucide.createIcons();
-      const hash = window.location.hash;
-      if (hash && hash.includes('room=')) {
-        const code = hash.split('room=')[1].split('&')[0];
-        if (code) {
-          document.getElementById('input-room-code').value = code.toUpperCase();
-        }
-      }
-    };
   </script>
 </body>
 </html>
