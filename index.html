@@ -265,13 +265,11 @@
       let deck = room.deck || [];
       let discard = room.discardPile || [];
 
-      // Collect all cards from player hands into discard pile before reset
       for (let pid in room.players || {}) {
         let hand = room.players[pid].currentHand || [];
         discard.push(...hand);
       }
 
-      // If main deck is low/empty, shuffle discard pile back into deck
       if (deck.length === 0) {
         if (discard.length > 0) {
           deck = discard.sort(() => Math.random() - 0.5);
@@ -302,7 +300,6 @@
       await roomRef.update(updates);
     }
 
-    // Pull a card safely, managing deck depletion and discard pile mixing
     async function pullCard(room) {
       let deck = room.deck || [];
       let discard = room.discardPile || [];
@@ -328,7 +325,6 @@
       let targetPlayer = room.players[targetPid];
       let hand = targetPlayer.currentHand || [];
 
-      // 1. Number Card Evaluation
       if (card.type === 'number') {
         const hasDuplicate = hand.some(c => c.type === 'number' && c.val === card.val);
         if (hasDuplicate) {
@@ -347,7 +343,6 @@
           }
         }
 
-        // Check Flip 7 condition (7 unique numbers)
         const uniqueNumbers = new Set(hand.filter(c => c.type === 'number').map(c => c.val));
         uniqueNumbers.add(card.val);
         if (uniqueNumbers.size >= 7) {
@@ -364,7 +359,6 @@
             status: 'stayed'
           };
 
-          // Check Win Condition (200 pts)
           if (newTotal >= 200) {
             updateData.status = 'won';
           }
@@ -404,7 +398,7 @@
 
       if (result.busted || result.stayed) {
         if (freshSnap.val().state !== 'game_over') {
-          await advanceTurn(freshSnap.val());
+          await advanceTurn();
         }
         return;
       }
@@ -421,7 +415,7 @@
 
       const postSnap = await roomRef.once('value');
       if (postSnap.val().state !== 'game_over') {
-        await advanceTurn(postSnap.val());
+        await advanceTurn();
       }
     }
 
@@ -441,7 +435,7 @@
       if (activeOpponents.length === 0) {
         modal.classList.add('hidden');
         addLog(`${room.players[myPlayerId].name} drew Freeze, but no opponents available to freeze.`);
-        advanceTurn(room);
+        advanceTurn();
         return;
       }
 
@@ -479,7 +473,7 @@
         return;
       }
 
-      await advanceTurn(room);
+      await advanceTurn();
     }
 
     function showFlip3Modal(room, beneficiaryId) {
@@ -550,7 +544,7 @@
         return;
       }
 
-      await advanceTurn(finalSnap.val());
+      await advanceTurn();
     }
 
     async function stayTurn() {
@@ -582,29 +576,34 @@
         return;
       }
 
-      const freshSnap = await roomRef.once('value');
-      await advanceTurn(freshSnap.val());
+      await advanceTurn();
     }
 
-    async function advanceTurn(room) {
-      if (room.state === 'game_over') return;
+    // FIXED advanceTurn function to correctly skip frozen/stayed/busted players
+    async function advanceTurn() {
+      const snap = await roomRef.once('value');
+      const room = snap.val();
+      if (!room || room.state !== 'playing') return;
 
       const order = room.playerOrder;
-      let nextIdx = room.turnIndex;
+      const players = room.players;
       
+      let nextIdx = room.turnIndex;
+      let found = false;
+
+      // Loop through player indices starting from the next position
       for (let i = 1; i <= order.length; i++) {
         let idx = (room.turnIndex + i) % order.length;
-        if (room.players[order[idx]].status === 'playing') {
+        let pid = order[idx];
+        if (players[pid] && players[pid].status === 'playing') {
           nextIdx = idx;
+          found = true;
           break;
         }
       }
 
-      const snap = await roomRef.once('value');
-      const players = snap.val().players;
-      const activePlayers = Object.values(players).filter(p => p.status === 'playing');
-
-      if (activePlayers.length === 0) {
+      if (!found) {
+        // All active players have finished (stayed or busted)
         addLog("--- ROUND ENDED ---");
         await roomRef.child('state').set('round_ended');
         return;
