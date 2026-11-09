@@ -353,8 +353,11 @@
       return { uid: localId };
     }
 
-    async function initAuth() {
-      currentUser = getOrCreateLocalUser();
+    function initAuth() {
+      if (!currentUser) {
+        currentUser = getOrCreateLocalUser();
+      }
+      return currentUser;
     }
 
     // Official Flip 7 Deck Creation
@@ -430,35 +433,41 @@
     }
 
     window.handleJoinOrCreate = async () => {
-      const usernameInput = document.getElementById('input-username').value.trim();
-      let roomCodeInput = document.getElementById('input-room-code').value.trim().toUpperCase();
+      try {
+        const usernameInput = document.getElementById('input-username').value.trim();
+        let roomCodeInput = document.getElementById('input-room-code').value.trim().toUpperCase();
 
-      if (!usernameInput) {
-        alert("Please enter a username to play!");
-        return;
-      }
-
-      await initAuth();
-
-      if (!roomCodeInput) {
-        roomCodeInput = Math.random().toString(36).substring(2, 7).toUpperCase();
-      }
-
-      currentRoomCode = roomCodeInput;
-      window.location.hash = `room=${currentRoomCode}`;
-
-      const roomRef = getRoomRef(currentRoomCode);
-      
-      roomRef.on('value', (snapshot) => {
-        const data = snapshot.val();
-        if (!data) {
-          createNewRoom(roomRef, usernameInput);
-        } else {
-          handleRoomUpdate(data, usernameInput);
+        if (!usernameInput) {
+          alert("Please enter a username to play!");
+          return;
         }
-      }, (err) => {
-        console.error("Realtime Database sync error:", err);
-      });
+
+        initAuth();
+
+        if (!roomCodeInput) {
+          roomCodeInput = Math.random().toString(36).substring(2, 7).toUpperCase();
+        }
+
+        currentRoomCode = roomCodeInput;
+        window.location.hash = `room=${currentRoomCode}`;
+
+        const roomRef = getRoomRef(currentRoomCode);
+        
+        roomRef.on('value', (snapshot) => {
+          const data = snapshot.val();
+          if (!data) {
+            createNewRoom(roomRef, usernameInput);
+          } else {
+            handleRoomUpdate(data, usernameInput);
+          }
+        }, (err) => {
+          console.error("Realtime Database sync error:", err);
+          alert("Database sync error: " + err.message);
+        });
+      } catch (err) {
+        console.error("Join room error:", err);
+        alert("Could not join/create room: " + err.message);
+      }
     };
 
     async function createNewRoom(roomRef, username) {
