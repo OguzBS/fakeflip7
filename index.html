@@ -3,30 +3,41 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Flip 7 Multiplayer</title>
+  <title>Flip 7 Online Multiplayer</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: #0f172a; color: #f8fafc; display: flex; flex-direction: column; min-height: 100vh; padding: 16px; }
-    .container { max-width: 600px; margin: 0 auto; width: 100%; }
+    body { background-color: #0f172a; color: #f8fafc; min-height: 100vh; padding: 16px; }
+    .container { max-width: 800px; margin: 0 auto; width: 100%; }
     .card-box { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 24px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); }
     h1 { color: #f59e0b; text-align: center; margin-bottom: 8px; font-size: 2rem; font-weight: 800; }
     p.sub { text-align: center; color: #94a3b8; margin-bottom: 24px; font-size: 0.9rem; }
     label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: #cbd5e1; font-weight: 600; text-transform: uppercase; }
     input { width: 100%; padding: 12px; background: #0f172a; border: 1px solid #475569; border-radius: 8px; color: #fff; font-size: 1rem; margin-bottom: 16px; }
-    input:focus { outline: none; border-color: #f59e0b; }
-    button { width: 100%; padding: 14px; background: #f59e0b; border: none; border-radius: 8px; color: #0f172a; font-weight: 700; font-size: 1rem; cursor: pointer; transition: background 0.2s; }
+    button { width: 100%; padding: 14px; background: #f59e0b; border: none; border-radius: 8px; color: #0f172a; font-weight: 700; font-size: 1rem; cursor: pointer; transition: all 0.2s; }
     button:hover { background: #d97706; }
     button:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; }
-    .debug-terminal { margin-top: 24px; background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.75rem; color: #38bdf8; max-height: 180px; overflow-y: auto; }
-    .debug-line { margin-bottom: 4px; word-break: break-all; }
-    .debug-err { color: #f87171; font-weight: bold; }
-    .debug-success { color: #4ade80; font-weight: bold; }
-    .hidden { display: none !important; }
-    .game-header { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
     .btn-secondary { background: #334155; color: #fff; padding: 8px 16px; font-size: 0.85rem; width: auto; }
+    .btn-secondary:hover { background: #475569; }
+    .hidden { display: none !important; }
+    
+    /* Lobby & Room */
+    .game-header { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #334155; }
+    .players-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 16px 0; }
+    .player-card { background: #0f172a; border: 2px solid #334155; border-radius: 8px; padding: 12px; text-align: center; }
+    .player-card.active-turn { border-color: #f59e0b; background: #1e1b4b; }
+    .player-card.busted { border-color: #ef4444; opacity: 0.6; }
+    .player-card.stayed { border-color: #10b981; }
+    
+    /* Cards */
+    .cards-flex { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 10px; }
+    .game-card { width: 55px; height: 80px; background: #3b82f6; border: 2px solid #fff; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: 800; font-size: 1.2rem; color: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+    .game-card.modifier { background: #8b5cf6; }
+    .game-card.second-chance { background: #10b981; }
+    
+    .action-controls { display: flex; gap: 12px; margin-top: 20px; }
+    .log-box { background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.8rem; color: #94a3b8; max-height: 120px; overflow-y: auto; margin-top: 16px; }
   </style>
 
-  <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 </head>
@@ -36,21 +47,17 @@
     <!-- LOBBY SCREEN -->
     <div id="lobby-screen" class="card-box">
       <h1>FLIP 7</h1>
-      <p class="sub">Online Realtime Multiplayer</p>
+      <p class="sub">Online Multiplayer</p>
       
-      <form id="join-form" onsubmit="handleEnterRoom(event)">
+      <form onsubmit="handleEnterRoom(event)">
         <label for="username">Your Nickname</label>
         <input type="text" id="username" placeholder="e.g. Alex" required maxlength="12">
 
-        <label for="room-code">Room Code (or leave blank for new room)</label>
+        <label for="room-code">Room Code (Leave blank to create new)</label>
         <input type="text" id="room-code" placeholder="e.g. GAME1" maxlength="10">
 
         <button type="submit" id="enter-btn">ENTER GAME ROOM</button>
       </form>
-
-      <div class="debug-terminal" id="debug-log">
-        <div class="debug-line">[System Ready] Waiting for user input...</div>
-      </div>
     </div>
 
     <!-- GAME ROOM SCREEN -->
@@ -60,30 +67,40 @@
           <span style="color:#94a3b8; font-size:0.8rem;">ROOM:</span>
           <strong id="disp-room" style="color:#f59e0b; font-size:1.1rem;">-</strong>
         </div>
-        <button class="btn-secondary" onclick="copyInviteLink()">Copy Invite Link</button>
+        <div>
+          <button class="btn-secondary" onclick="copyInviteLink()">Copy Invite Link</button>
+        </div>
       </div>
 
-      <div style="text-align: center; padding: 24px 0;">
-        <h2 style="margin-bottom: 8px;">Connected to Room!</h2>
-        <p style="color: #94a3b8;" id="disp-player">Logged in...</p>
-        <div id="players-list" style="margin-top: 20px; text-align: left; background: #0f172a; padding: 16px; border-radius: 8px;"></div>
+      <!-- WAITING LOBBY -->
+      <div id="waiting-area" style="text-align: center; padding: 16px 0;">
+        <h2 style="margin-bottom: 8px;">Waiting Room</h2>
+        <div id="lobby-players-list" class="players-grid"></div>
+        <div id="host-controls" style="margin-top: 20px;">
+          <button id="start-btn" onclick="startGame()">START GAME</button>
+          <p id="non-host-msg" style="color: #94a3b8; margin-top: 8px;" class="hidden">Waiting for the host to start the game...</p>
+        </div>
+      </div>
+
+      <!-- LIVE GAME AREA -->
+      <div id="play-area" class="hidden">
+        <div style="text-align:center; margin-bottom:16px;">
+          <h3 id="turn-indicator" style="color:#f59e0b; font-size:1.3rem;">Current Turn: -</h3>
+        </div>
+
+        <div id="game-players-grid" class="players-grid"></div>
+
+        <div id="my-action-controls" class="action-controls hidden">
+          <button onclick="drawCard()" style="background:#10b981; color:#fff;">HIT (FLIP CARD)</button>
+          <button onclick="stayTurn()" class="btn-secondary">STAY (KEEP POINTS)</button>
+        </div>
+
+        <div id="game-logs" class="log-box"></div>
       </div>
     </div>
   </div>
 
   <script>
-    function log(msg, type = 'info') {
-      const box = document.getElementById('debug-log');
-      if (!box) return;
-      const line = document.createElement('div');
-      line.className = 'debug-line ' + (type === 'err' ? 'debug-err' : type === 'success' ? 'debug-success' : '');
-      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-      box.appendChild(line);
-      box.scrollTop = box.scrollHeight;
-      console.log(msg);
-    }
-
-    // Explicit config with your exact regional databaseURL
     const firebaseConfig = {
       apiKey: "AIzaSyDueZlgNd4RwI2tkgxl_v0VSFXE9OYRjLc",
       authDomain: "fakeflip7.firebaseapp.com",
@@ -95,106 +112,245 @@
     };
 
     let db;
-    let myPlayerId = 'p_' + Math.random().toString(36).substring(2, 9);
+    // Persistent Player ID across page refreshes
+    let myPlayerId = localStorage.getItem('flip7_pid');
+    if (!myPlayerId) {
+      myPlayerId = 'p_' + Math.random().toString(36).substring(2, 9);
+      localStorage.setItem('flip7_pid', myPlayerId);
+    }
+
     let currentRoomCode = '';
+    let roomRef = null;
 
     window.addEventListener('DOMContentLoaded', () => {
-      try {
-        log("Connecting to Europe database...");
-        if (!firebase.apps.length) {
-          firebase.initializeApp(firebaseConfig);
-        }
-        db = firebase.database();
-        log("Database engine initialized!", "success");
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+      db = firebase.database();
 
-        if (window.location.hash) {
-          const codeFromUrl = window.location.hash.substring(1).toUpperCase();
-          document.getElementById('room-code').value = codeFromUrl;
-          log("Detected room code from URL: " + codeFromUrl);
-        }
-      } catch (err) {
-        log("Init Error: " + err.message, "err");
+      if (window.location.hash) {
+        document.getElementById('room-code').value = window.location.hash.substring(1).toUpperCase();
       }
     });
 
     async function handleEnterRoom(e) {
       e.preventDefault();
-      
-      const btn = document.getElementById('enter-btn');
-      const usernameInput = document.getElementById('username').value.trim();
-      let roomCodeInput = document.getElementById('room-code').value.trim().toUpperCase();
+      const username = document.getElementById('username').value.trim();
+      let code = document.getElementById('room-code').value.trim().toUpperCase();
 
-      if (!usernameInput) {
-        alert("Please enter a nickname");
-        return;
-      }
+      if (!code) code = Math.random().toString(36).substring(2, 7).toUpperCase();
+      currentRoomCode = code;
 
-      if (!roomCodeInput) {
-        roomCodeInput = Math.random().toString(36).substring(2, 7).toUpperCase();
-        document.getElementById('room-code').value = roomCodeInput;
-      }
-
-      currentRoomCode = roomCodeInput;
-      btn.disabled = true;
-      btn.textContent = "CONNECTING...";
-      log(`Connecting to room [${currentRoomCode}]...`);
-
+      roomRef = db.ref(`rooms/${currentRoomCode}`);
       const playerRef = db.ref(`rooms/${currentRoomCode}/players/${myPlayerId}`);
-      const roomRef = db.ref(`rooms/${currentRoomCode}`);
 
       try {
-        // Direct write test
+        const snap = await roomRef.once('value');
+        const roomData = snap.val() || {};
+
+        // If room is empty or has no host, make this player the host & set state to waiting
+        if (!roomData.host || !roomData.players) {
+          await roomRef.set({
+            host: myPlayerId,
+            state: 'waiting',
+            players: {}
+          });
+        }
+
         await playerRef.set({
-          name: usernameInput,
-          joinedAt: Date.now()
+          name: username,
+          totalScore: 0,
+          currentHand: [],
+          status: 'active'
         });
 
-        // Set disconnect listener to clean up if window closes
         playerRef.onDisconnect().remove();
 
-        log("Successfully connected to room!", "success");
-
-        // Listen for live room changes
         roomRef.on('value', (snapshot) => {
           const data = snapshot.val();
-          if (data && data.players) {
-            renderRoomState(data.players);
-          }
+          if (data) renderRoom(data);
         });
 
         window.location.hash = currentRoomCode;
         document.getElementById('lobby-screen').classList.add('hidden');
         document.getElementById('game-screen').classList.remove('hidden');
         document.getElementById('disp-room').textContent = currentRoomCode;
-        document.getElementById('disp-player').textContent = `Playing as: ${usernameInput}`;
 
       } catch (err) {
-        log("Connection Failed: " + err.message, "err");
-        alert("Firebase Connection Failed: " + err.message + "\n\nMake sure your Database Rules in Firebase Console are set to read: true, write: true.");
-        btn.disabled = false;
-        btn.textContent = "ENTER GAME ROOM";
+        alert("Error connecting: " + err.message);
       }
     }
 
-    function renderRoomState(playersObj) {
-      const listEl = document.getElementById('players-list');
-      if (!listEl) return;
+    function createDeck() {
+      let deck = [];
+      for (let i = 0; i <= 12; i++) {
+        let count = i === 0 ? 1 : i;
+        for (let j = 0; j < count; j++) deck.push({ type: 'number', val: i });
+      }
+      ['+2', '+3', '+4', '+5', '+6', '+7', '+8', '+9', '+10', 'x2'].forEach(m => deck.push({ type: 'modifier', val: m }));
+      for (let i = 0; i < 3; i++) deck.push({ type: 'second-chance', val: '🛡️' });
+      return deck.sort(() => Math.random() - 0.5);
+    }
 
-      const playersHtml = Object.entries(playersObj).map(([id, p]) => `
-        <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #334155;">
-          <span>${p.name} ${id === myPlayerId ? '<strong style="color:#f59e0b;">(You)</strong>' : ''}</span>
-          <span style="color:#4ade80;">ONLINE</span>
-        </div>
-      `).join('');
+    async function startGame() {
+      const snap = await roomRef.once('value');
+      const room = snap.val();
+      if (!room || room.host !== myPlayerId) return;
 
-      listEl.innerHTML = `<h3 style="margin-bottom:12px; font-size:0.9rem; color:#94a3b8;">CONNECTED PLAYERS (${Object.keys(playersObj).length}):</h3>` + playersHtml;
+      const deck = createDeck();
+      const playerIds = Object.keys(room.players || {});
+
+      await roomRef.update({
+        state: 'playing',
+        deck: deck,
+        playerOrder: playerIds,
+        turnIndex: 0,
+        logs: [`Game started by Host!`]
+      });
+
+      for (let pid of playerIds) {
+        await roomRef.child(`players/${pid}`).update({ currentHand: [], status: 'playing' });
+      }
+    }
+
+    async function drawCard() {
+      const snap = await roomRef.once('value');
+      const room = snap.val();
+      let deck = room.deck || [];
+
+      if (deck.length === 0) deck = createDeck();
+      const card = deck.pop();
+
+      let myHand = room.players[myPlayerId].currentHand || [];
+      const isNumber = card.type === 'number';
+      const hasDuplicate = isNumber && myHand.some(c => c.type === 'number' && c.val === card.val);
+
+      if (hasDuplicate) {
+        const scIndex = myHand.findIndex(c => c.type === 'second-chance');
+        if (scIndex !== -1) {
+          myHand.splice(scIndex, 1);
+          addLog(`${room.players[myPlayerId].name} hit duplicate ${card.val} but used SECOND CHANCE!`);
+        } else {
+          addLog(`${room.players[myPlayerId].name} hit duplicate ${card.val} and BUSTED!`);
+          await roomRef.child(`players/${myPlayerId}`).update({ currentHand: [], status: 'busted' });
+          nextTurn(room);
+          return;
+        }
+      } else {
+        myHand.push(card);
+        addLog(`${room.players[myPlayerId].name} drew [${card.val}]`);
+      }
+
+      await roomRef.child(`players/${myPlayerId}`).update({ currentHand: myHand });
+      await roomRef.child('deck').set(deck);
+    }
+
+    async function stayTurn() {
+      const snap = await roomRef.once('value');
+      const room = snap.val();
+      const myHand = room.players[myPlayerId].currentHand || [];
+      
+      let roundScore = 0;
+      let multiplier = 1;
+
+      myHand.forEach(c => {
+        if (c.type === 'number') roundScore += c.val;
+        if (c.type === 'modifier') {
+          if (c.val === 'x2') multiplier *= 2;
+          else roundScore += parseInt(c.val);
+        }
+      });
+
+      roundScore *= multiplier;
+      const currentTotal = room.players[myPlayerId].totalScore || 0;
+
+      addLog(`${room.players[myPlayerId].name} STAYED and scored ${roundScore} pts!`);
+
+      await roomRef.child(`players/${myPlayerId}`).update({
+        totalScore: currentTotal + roundScore,
+        status: 'stayed'
+      });
+
+      nextTurn(room);
+    }
+
+    async function nextTurn(room) {
+      const order = room.playerOrder;
+      let nextIdx = (room.turnIndex + 1) % order.length;
+      
+      const snap = await roomRef.once('value');
+      const players = snap.val().players;
+      const activePlayers = Object.values(players).filter(p => p.status === 'playing');
+
+      if (activePlayers.length === 0) {
+        addLog("--- ROUND ENDED ---");
+        for (let pid in players) {
+          await roomRef.child(`players/${pid}`).update({ currentHand: [], status: 'playing' });
+        }
+        await roomRef.child('deck').set(createDeck());
+      }
+
+      await roomRef.child('turnIndex').set(nextIdx);
+    }
+
+    async function addLog(msg) {
+      const snap = await roomRef.once('value');
+      let logs = snap.val().logs || [];
+      logs.unshift(`[${new Date().toLocaleTimeString()}] ${msg}`);
+      if (logs.length > 20) logs.pop();
+      await roomRef.child('logs').set(logs);
+    }
+
+    function renderRoom(room) {
+      const isWaiting = room.state === 'waiting';
+      document.getElementById('waiting-area').classList.toggle('hidden', !isWaiting);
+      document.getElementById('play-area').classList.toggle('hidden', isWaiting);
+
+      const isUserHost = room.host === myPlayerId;
+
+      if (isWaiting) {
+        document.getElementById('start-btn').classList.toggle('hidden', !isUserHost);
+        document.getElementById('non-host-msg').classList.toggle('hidden', isUserHost);
+
+        const list = document.getElementById('lobby-players-list');
+        list.innerHTML = Object.entries(room.players || {}).map(([id, p]) => `
+          <div class="player-card">
+            <strong>${p.name}</strong> ${id === room.host ? '<span style="color:#f59e0b;">(Host)</span>' : ''}
+          </div>
+        `).join('');
+        return;
+      }
+
+      const activePlayerId = room.playerOrder[room.turnIndex];
+      const isMyTurn = activePlayerId === myPlayerId && room.players[myPlayerId]?.status === 'playing';
+
+      document.getElementById('turn-indicator').textContent = isMyTurn ? "IT'S YOUR TURN!" : `Current Turn: ${room.players[activePlayerId]?.name || '-'}`;
+      document.getElementById('my-action-controls').classList.toggle('hidden', !isMyTurn);
+
+      const grid = document.getElementById('game-players-grid');
+      grid.innerHTML = room.playerOrder.map(pid => {
+        const p = room.players[pid];
+        if (!p) return '';
+        const hand = p.currentHand || [];
+        const isActive = pid === activePlayerId;
+
+        return `
+          <div class="player-card ${isActive ? 'active-turn' : ''} ${p.status === 'busted' ? 'busted' : ''} ${p.status === 'stayed' ? 'stayed' : ''}">
+            <div style="font-weight:bold; font-size:1.1rem; color:#f59e0b;">${p.name}</div>
+            <div style="font-size:0.85rem; color:#94a3b8; margin: 4px 0;">Total Points: <strong>${p.totalScore || 0}</strong></div>
+            <div style="font-size:0.75rem; color:#4ade80;">STATUS: ${(p.status || 'playing').toUpperCase()}</div>
+            <div class="cards-flex">
+              ${hand.map(c => `<div class="game-card ${c.type}">${c.val}</div>`).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const logsBox = document.getElementById('game-logs');
+      logsBox.innerHTML = (room.logs || []).map(l => `<div>${l}</div>`).join('');
     }
 
     function copyInviteLink() {
       const url = window.location.origin + window.location.pathname + '#' + currentRoomCode;
-      navigator.clipboard.writeText(url).then(() => {
-        alert("Invite link copied to clipboard!\n" + url);
-      });
+      navigator.clipboard.writeText(url).then(() => alert("Invite link copied to clipboard!"));
     }
   </script>
 </body>
