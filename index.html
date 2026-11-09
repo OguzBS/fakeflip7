@@ -433,12 +433,16 @@
     }
 
     window.handleJoinOrCreate = async () => {
+      const btn = document.querySelector("button[onclick='handleJoinOrCreate()']");
+      if (btn) btn.disabled = true;
+
       try {
         const usernameInput = document.getElementById('input-username').value.trim();
         let roomCodeInput = document.getElementById('input-room-code').value.trim().toUpperCase();
 
         if (!usernameInput) {
           alert("Please enter a username to play!");
+          if (btn) btn.disabled = false;
           return;
         }
 
@@ -453,22 +457,67 @@
 
         const roomRef = getRoomRef(currentRoomCode);
         
-        roomRef.on('value', (snapshot) => {
-          const data = snapshot.val();
-          if (!data) {
-            createNewRoom(roomRef, usernameInput);
-          } else {
-            handleRoomUpdate(data, usernameInput);
+        // Fetch snapshot once to create or join
+        const snapshot = await roomRef.once('value');
+        const data = snapshot.val();
+
+        if (!data) {
+          await createNewRoom(roomRef, usernameInput);
+        } else {
+          await joinExistingRoom(data, usernameInput);
+        }
+
+        // Attach real-time listener for live updates
+        if (roomUnsubscribe) roomRef.off('value', roomUnsubscribe);
+        roomUnsubscribe = roomRef.on('value', (snap) => {
+          const val = snap.val();
+          if (val) {
+            gameState = val;
+            renderGameState();
           }
         }, (err) => {
-          console.error("Realtime Database sync error:", err);
-          alert("Database sync error: " + err.message);
+          console.error("Realtime sync error:", err);
         });
+
+        // Switch to game screen
+        document.getElementById('screen-join').classList.add('hidden');
+        document.getElementById('screen-game').classList.remove('hidden');
+        document.getElementById('btn-copy-link').classList.remove('hidden');
+        document.getElementById('room-status-sub').textContent = `Room Code: ${currentRoomCode}`;
+
       } catch (err) {
         console.error("Join room error:", err);
-        alert("Could not join/create room: " + err.message);
+        alert("Connection Error:\n" + err.message + "\n\nPlease ensure your Firebase Realtime Database is created with test rules (read/write: true).");
+      } finally {
+        if (btn) btn.disabled = false;
       }
     };
+
+    async function joinExistingRoom(data, currentUsername) {
+      gameState = data;
+      if (!gameState.players) gameState.players = {};
+      if (!gameState.turnOrder) gameState.turnOrder = [];
+
+      if (!gameState.players[currentUser.uid]) {
+        const updatedPlayers = { ...gameState.players };
+        updatedPlayers[currentUser.uid] = {
+          uid: currentUser.uid,
+          name: currentUsername,
+          totalScore: 0,
+          status: gameState.status === 'lobby' ? 'waiting' : 'stayed',
+          cards: [],
+          secondChance: false,
+          flip7Bonus: false
+        };
+        const updatedOrder = [...gameState.turnOrder, currentUser.uid];
+        
+        await getRoomRef(currentRoomCode).update({
+          players: updatedPlayers,
+          turnOrder: updatedOrder,
+          logs: [...(gameState.logs || []), `${currentUsername} joined the room.`]
+        });
+      }
+    }
 
     async function createNewRoom(roomRef, username) {
       const initialDeck = createFlip7Deck();
