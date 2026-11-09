@@ -212,16 +212,12 @@
 
     function createDeck() {
       let deck = [];
-      // Number cards 0-12 matching frequency
       for (let i = 0; i <= 12; i++) {
         let count = i === 0 ? 1 : i;
         for (let j = 0; j < count; j++) deck.push({ type: 'number', val: i });
       }
-      // Modifiers
       ['+2', '+3', '+4', '+5', '+6', '+7', '+8', '+9', '+10', 'x2'].forEach(m => deck.push({ type: 'modifier', val: m }));
-      // Second Chance Shields
       for (let i = 0; i < 3; i++) deck.push({ type: 'second-chance', val: '🛡️', display: '🛡️ Shield' });
-      // Action Cards (Freeze, Flip Three)
       for (let i = 0; i < 3; i++) deck.push({ type: 'action', val: 'FREEZE', display: '❄️ Freeze' });
       for (let i = 0; i < 3; i++) deck.push({ type: 'action', val: 'FLIP3', display: '3️⃣ Flip 3' });
 
@@ -260,7 +256,7 @@
 
       let myHand = room.players[myPlayerId].currentHand || [];
 
-      // 1. Handle Number Card & Bust check
+      // 1. Handle Number Card & Bust / Flip 7 Check
       if (card.type === 'number') {
         const hasDuplicate = myHand.some(c => c.type === 'number' && c.val === card.val);
         if (hasDuplicate) {
@@ -271,7 +267,7 @@
             addLog(`${room.players[myPlayerId].name} hit duplicate ${card.val} but was saved by SECOND CHANCE!`);
             await roomRef.child(`players/${myPlayerId}`).update({ currentHand: myHand });
             await roomRef.child('deck').set(deck);
-            await advanceTurn(room); // Hit finishes turn
+            await advanceTurn(room);
             return;
           } else {
             myHand.push(card);
@@ -281,6 +277,25 @@
             await advanceTurn(room);
             return;
           }
+        }
+
+        // Check for Flip 7 bonus condition (7 unique numbers)
+        const uniqueNumbers = new Set(myHand.filter(c => c.type === 'number').map(c => c.val));
+        uniqueNumbers.add(card.val);
+        if (uniqueNumbers.size >= 7) {
+          myHand.push(card);
+          let roundScore = calculateHandScore(myHand) + 15; // Flip 7 Bonus (+15 pts)
+          const currentTotal = room.players[myPlayerId].totalScore || 0;
+          addLog(`${room.players[myPlayerId].name} hit FLIP 7! Bonus +15 points awarded!`);
+          await roomRef.child(`players/${myPlayerId}`).update({
+            currentHand: myHand,
+            totalScore: currentTotal + roundScore,
+            roundScore: roundScore,
+            status: 'stayed'
+          });
+          await roomRef.child('deck').set(deck);
+          await advanceTurn(room);
+          return;
         }
       }
 
@@ -292,10 +307,10 @@
 
         if (card.val === 'FREEZE') {
           showFreezeModal(room);
-          return; // Pause turn progression until modal choice is made
+          return;
         } else if (card.val === 'FLIP3') {
           showFlip3Modal(room);
-          return; // Pause turn progression until modal choice is made
+          return;
         }
       } else {
         myHand.push(card);
@@ -309,7 +324,6 @@
       });
       await roomRef.child('deck').set(deck);
 
-      // Hit completed 1 card -> Advance Turn
       await advanceTurn(room);
     }
 
@@ -397,7 +411,6 @@
           if (deck.length === 0) deck = createDeck();
           let c = deck.pop();
           myHand.push(c);
-          addLog(`...Flip 3 drew [${c.val !== undefined ? c.val : c.display}]`);
         }
         await roomRef.child(`players/${myPlayerId}`).update({
           currentHand: myHand,
@@ -446,14 +459,18 @@
       const order = room.playerOrder;
       let nextIdx = room.turnIndex;
       
+      // Find the next active player with status 'playing'
+      let found = false;
       for (let i = 1; i <= order.length; i++) {
         let idx = (room.turnIndex + i) % order.length;
         if (room.players[order[idx]].status === 'playing') {
           nextIdx = idx;
+          found = true;
           break;
         }
       }
 
+      // Check if all players have finished (stayed or busted)
       const snap = await roomRef.once('value');
       const players = snap.val().players;
       const activePlayers = Object.values(players).filter(p => p.status === 'playing');
@@ -501,7 +518,7 @@
     function renderRoom(room) {
       const isWaiting = room.state === 'waiting';
       document.getElementById('waiting-area').classList.toggle('hidden', !isWaiting);
-      document.getElementById('play-area').classList.toggle('hidden', !isWaiting ? false : true);
+      document.getElementById('play-area').classList.toggle('hidden', isWaiting);
 
       const isUserHost = room.host === myPlayerId;
 
