@@ -321,7 +321,6 @@
       return card;
     }
 
-    // Synchronous helper to find the next active player index
     function getNextTurnIndex(room, currentTurnIndex) {
       const order = room.playerOrder;
       const players = room.players;
@@ -333,21 +332,24 @@
           return idx;
         }
       }
-      return -1; // All players finished
+      return -1;
     }
 
-    // In-memory card processing to prevent Firebase asynchronous race conditions
     function processDrawnCardInMemory(room, targetPid, card) {
       let targetPlayer = room.players[targetPid];
       let hand = targetPlayer.currentHand || [];
+      room.discardPile = room.discardPile || [];
 
       if (card.type === 'number') {
         const hasDuplicate = hand.some(c => c.type === 'number' && c.val === card.val);
         if (hasDuplicate) {
           const scIndex = hand.findIndex(c => c.type === 'second-chance');
           if (scIndex !== -1) {
-            hand.splice(scIndex, 1);
-            hand.push(card);
+            // Remove Second Chance from hand and discard both the Second Chance card and the duplicate card
+            const scCard = hand.splice(scIndex, 1)[0];
+            room.discardPile.push(scCard);
+            room.discardPile.push(card);
+
             targetPlayer.currentHand = hand;
             return { busted: false, actionDrawn: null };
           } else {
@@ -401,6 +403,7 @@
       updates[`players/${myPlayerId}/roundScore`] = freshRoom.players[myPlayerId].roundScore;
       updates[`players/${myPlayerId}/status`] = freshRoom.players[myPlayerId].status;
       updates[`players/${myPlayerId}/totalScore`] = freshRoom.players[myPlayerId].totalScore;
+      updates['discardPile'] = freshRoom.discardPile;
 
       if (freshRoom.players[myPlayerId].status === 'won') {
         updates['state'] = 'game_over';
@@ -410,8 +413,20 @@
         return;
       }
 
-      if (result.busted || result.stayed) {
-        addLog(`${freshRoom.players[myPlayerId].name} ${result.busted ? 'BUSTED' : 'hit FLIP 7 and STAYED'}!`);
+      if (result.busted) {
+        addLog(`${freshRoom.players[myPlayerId].name} hit duplicate and BUSTED!`);
+        let nextIdx = getNextTurnIndex(freshRoom, freshRoom.turnIndex);
+        if (nextIdx === -1) {
+          updates['state'] = 'round_ended';
+        } else {
+          updates['turnIndex'] = nextIdx;
+        }
+        await roomRef.update(updates);
+        return;
+      }
+
+      if (result.stayed) {
+        addLog(`${freshRoom.players[myPlayerId].name} hit FLIP 7 and STAYED!`);
         let nextIdx = getNextTurnIndex(freshRoom, freshRoom.turnIndex);
         if (nextIdx === -1) {
           updates['state'] = 'round_ended';
@@ -435,13 +450,19 @@
         }
       }
 
+      // If Second Chance saved the player, log it and pass turn normally
+      if (card.type === 'number') {
+        addLog(`${freshRoom.players[myPlayerId].name} drew duplicate ${card.val} but was saved by SECOND CHANCE (Card & duplicate discarded).`);
+      } else {
+        addLog(`${freshRoom.players[myPlayerId].name} drew [${card.val !== undefined ? card.val : card.display}]`);
+      }
+
       let nextIdx = getNextTurnIndex(freshRoom, freshRoom.turnIndex);
       if (nextIdx === -1) {
         updates['state'] = 'round_ended';
       } else {
         updates['turnIndex'] = nextIdx;
       }
-      addLog(`${freshRoom.players[myPlayerId].name} drew [${card.val !== undefined ? card.val : card.display}]`);
       await roomRef.update(updates);
     }
 
@@ -498,7 +519,6 @@
         return;
       }
 
-      // Atomically calculate next turn index after freezing target
       let nextIdx = getNextTurnIndex(room, room.turnIndex);
       if (nextIdx === -1) {
         updates['state'] = 'round_ended';
@@ -565,6 +585,7 @@
         updates[`players/${actualTargetId}/roundScore`] = updatedRoom.players[actualTargetId].roundScore;
         updates[`players/${actualTargetId}/status`] = updatedRoom.players[actualTargetId].status;
         updates[`players/${actualTargetId}/totalScore`] = updatedRoom.players[actualTargetId].totalScore;
+        updates['discardPile'] = updatedRoom.discardPile;
 
         if (updatedRoom.players[actualTargetId].status === 'won') {
           updates['state'] = 'game_over';
