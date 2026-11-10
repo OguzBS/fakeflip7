@@ -47,7 +47,38 @@
     .modal-buttons { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
 
     .action-controls { display: flex; gap: 12px; margin-top: 20px; }
-    .log-box { background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.8rem; color: #94a3b8; max-height: 120px; overflow-y: auto; margin-top: 16px; }
+    .action-controls button { flex: 1; }
+    .log-box { background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.8rem; color: #94a3b8; max-height: 150px; overflow-y: auto; margin-top: 16px; line-height: 1.55; }
+    .log-box div { padding: 3px 0; border-bottom: 1px solid rgba(148,163,184,0.08); }
+    .player-card { transition: border-color .2s ease, background .2s ease, transform .2s ease; }
+    .player-card.active-turn { box-shadow: 0 0 0 2px rgba(245,158,11,.12); }
+    .game-card { animation: card-arrive .28s ease-out both; }
+    @keyframes card-arrive { from { opacity: 0; transform: translateY(9px) scale(.92); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+    /* Shared card reveal: every player sees what was drawn before the next action begins. */
+    .draw-reveal-content { max-width: 360px; padding: 26px; }
+    .reveal-kicker { color: #94a3b8; font-size: .75rem; font-weight: 800; letter-spacing: .12em; margin-bottom: 14px; text-transform: uppercase; }
+    .revealed-card { width: 112px; height: 158px; border: 3px solid #fff; border-radius: 14px; margin: 0 auto 18px; display: flex; align-items: center; justify-content: center; box-shadow: 0 12px 28px rgba(0,0,0,.38); font-size: 2rem; font-weight: 900; animation: reveal-pop .32s cubic-bezier(.2,.8,.2,1) both; }
+    .revealed-card.number { background: #2563eb; }
+    .revealed-card.modifier { background: #7c3aed; font-size: 1.65rem; }
+    .revealed-card.second-chance { background: #059669; font-size: 2.4rem; }
+    .revealed-card.action { background: #db2777; font-size: 1.15rem; text-align: center; padding: 10px; line-height: 1.2; }
+    #draw-reveal-title { color: #f8fafc; font-size: 1.12rem; margin-bottom: 8px; }
+    #draw-reveal-desc { color: #cbd5e1; font-size: .9rem; line-height: 1.45; min-height: 42px; }
+    .reveal-progress { height: 4px; background: #334155; border-radius: 99px; overflow: hidden; margin-top: 18px; }
+    .reveal-progress-fill { height: 100%; width: 0; background: #f59e0b; }
+    @keyframes reveal-pop { from { opacity: 0; transform: translateY(12px) rotate(-4deg) scale(.85); } to { opacity: 1; transform: translateY(0) rotate(0) scale(1); } }
+    .action-modal-card { display: inline-flex; align-items: center; justify-content: center; width: 58px; height: 76px; border: 2px solid #fff; border-radius: 9px; background: #db2777; font-size: 1.15rem; font-weight: 900; margin: 0 auto 12px; }
+    .modal-content h3 { line-height: 1.25; }
+    .modal-content .modal-buttons button { min-height: 46px; }
+    @media (max-width: 600px) {
+      body { padding: 8px; }
+      .card-box { padding: 16px; }
+      .action-controls { flex-direction: column; }
+      .players-grid { grid-template-columns: 1fr; }
+      .scoreboard table { font-size: .8rem; }
+      .scoreboard th, .scoreboard td { padding: 7px 5px; }
+    }
   </style>
 
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -133,9 +164,21 @@
     </div>
   </div>
 
+  <!-- CARD REVEAL OVERLAY -->
+  <div id="draw-reveal-modal" class="modal-overlay hidden" aria-live="polite">
+    <div class="modal-content draw-reveal-content">
+      <div class="reveal-kicker" id="draw-reveal-kicker">CARD DRAWN</div>
+      <div class="revealed-card number" id="revealed-card">5</div>
+      <h3 id="draw-reveal-title">A player drew a card</h3>
+      <p id="draw-reveal-desc">The card is being added to the player's hand.</p>
+      <div class="reveal-progress"><div class="reveal-progress-fill" id="reveal-progress-fill"></div></div>
+    </div>
+  </div>
+
   <!-- ACTION MODAL OVERLAY -->
   <div id="action-modal" class="modal-overlay hidden">
     <div class="modal-content">
+      <div id="action-modal-card" class="action-modal-card">❄️</div>
       <h3 id="modal-title" style="color:#f59e0b; margin-bottom:8px;">Action Card Triggered</h3>
       <p id="modal-desc" style="color:#94a3b8; font-size:0.9rem; margin-bottom:16px;">Choose how to play this card:</p>
       <div id="modal-buttons" class="modal-buttons"></div>
@@ -164,6 +207,10 @@
     let roomRef = null;
     let lastShownPendingActionId = null;
     let repairInProgress = false;
+    let latestRoomData = null;
+    let lastShownRevealId = null;
+    let revealInProgress = false;
+    let revealTimeout = null;
 
     window.addEventListener('DOMContentLoaded', () => {
       if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
@@ -225,6 +272,114 @@
         }
       });
       return score * multiplier;
+    }
+
+    function hasActiveFreezeTarget(room, actorId) {
+      const order = Array.isArray(room.playerOrder) ? room.playerOrder : Object.keys(room.players || {});
+      return order.some(pid => pid !== actorId && room.players && room.players[pid] && room.players[pid].status === 'playing');
+    }
+
+    function cardLabel(card) {
+      if (!card) return 'Unknown card';
+      if (card.type === 'number' || card.type === 'modifier') return String(card.val);
+      if (card.type === 'second-chance') return 'SECOND CHANCE';
+      if (card.type === 'action') return card.val === 'FLIP3' ? 'FLIP THREE' : 'FREEZE';
+      return String(card.display || card.val || card.type);
+    }
+
+    function createDrawEvent(player, card, result) {
+      const label = cardLabel(card);
+      let title = `${player.name} drew ${label}`;
+      let detail = `The ${label} card was added to ${player.name}'s hand.`;
+
+      if (result.saved) {
+        title = 'SECOND CHANCE ACTIVATED';
+        detail = `The duplicate ${card.val} was discarded with the shield. The original ${card.val} stays in the hand.`;
+      } else if (result.busted) {
+        title = `${player.name} BUSTED`;
+        detail = `The duplicate ${card.val} was drawn. The round score is now 0.`;
+      } else if (result.flip7) {
+        title = 'FLIP 7!';
+        detail = `${player.name} collected seven different numbers and secured ${player.roundScore} points, including the 15-point bonus.`;
+      } else if (result.unavailableAction) {
+        title = 'FREEZE CARD KEPT';
+        detail = 'There is no active opponent to freeze. The Freeze card stays in the hand, and the player may draw again.';
+      } else if (card.type === 'action' && card.val === 'FREEZE') {
+        title = 'FREEZE ACTION';
+        detail = `${player.name} must choose an active opponent to stop. The target will secure their current hand and leave the round.`;
+      } else if (card.type === 'action' && card.val === 'FLIP3') {
+        title = 'FLIP THREE ACTION';
+        detail = `${player.name} can draw three cards or force an active opponent to draw three cards.`;
+      } else if (card.type === 'second-chance') {
+        detail = 'This shield protects the player from one duplicate number. It is used automatically if needed.';
+      } else if (card.type === 'modifier') {
+        detail = card.val === 'x2' ? 'This doubles the hand score, including number cards and additive modifiers.' : `This adds ${card.val.replace('+', '')} points to the hand score.`;
+      }
+
+      return {
+        playerName: player.name,
+        cardType: card.type,
+        cardValue: card.type === 'action' ? (card.val === 'FLIP3' ? 'FLIP 3' : 'FREEZE') :
+          (card.type === 'second-chance' ? '🛡️' : label),
+        title,
+        detail
+      };
+    }
+
+    function showDrawReveal(room) {
+      const sequence = room && room.lastDrawSequence;
+      if (!sequence || !sequence.id || !Array.isArray(sequence.events) || sequence.events.length === 0) return;
+      if (sequence.id === lastShownRevealId) return;
+
+      // Ignore old announcements when a player joins or refreshes much later.
+      if (sequence.createdAt && Date.now() - sequence.createdAt > 20000) {
+        lastShownRevealId = sequence.id;
+        return;
+      }
+
+      lastShownRevealId = sequence.id;
+      revealInProgress = true;
+      if (revealTimeout) clearTimeout(revealTimeout);
+      document.getElementById('action-modal').classList.add('hidden');
+      const modal = document.getElementById('draw-reveal-modal');
+      const cardEl = document.getElementById('revealed-card');
+      const kicker = document.getElementById('draw-reveal-kicker');
+      const title = document.getElementById('draw-reveal-title');
+      const desc = document.getElementById('draw-reveal-desc');
+      const progress = document.getElementById('reveal-progress-fill');
+      const events = sequence.events;
+      let index = 0;
+      modal.classList.remove('hidden');
+
+      const showStep = () => {
+        const event = events[index];
+        cardEl.className = `revealed-card ${event.cardType || 'number'}`;
+        cardEl.textContent = event.cardValue || '?';
+        kicker.textContent = events.length > 1
+          ? `FLIP THREE · CARD ${index + 1} OF ${events.length}`
+          : `CARD DRAWN · ${event.playerName || 'PLAYER'}`;
+        title.textContent = event.title || 'Card drawn';
+        desc.textContent = event.detail || '';
+        progress.style.transition = 'none';
+        progress.style.width = '0%';
+        // Force layout so each reveal gets a fresh progress animation.
+        void progress.offsetWidth;
+        progress.style.transition = 'width 0.95s linear';
+        progress.style.width = '100%';
+
+        const delay = events.length > 1 ? 1050 : (event.cardType === 'action' ? 1550 : 1250);
+        revealTimeout = setTimeout(() => {
+          index += 1;
+          if (index < events.length) {
+            showStep();
+          } else {
+            modal.classList.add('hidden');
+            revealInProgress = false;
+            if (latestRoomData) renderRoom(latestRoomData);
+          }
+        }, delay);
+      };
+      showStep();
     }
 
     // This function is only called inside a room transaction. The deck, discard pile,
@@ -321,6 +476,12 @@
       targetPlayer.roundScore = calculateHandScore(hand);
 
       if (card.type === 'action') {
+        // Freeze has no valid target when this is the only active player. Keep the
+        // card in the hand and let the same player take another draw instead of
+        // creating a pending action that cannot be resolved.
+        if (card.val === 'FREEZE' && !hasActiveFreezeTarget(room, targetPid)) {
+          return { busted: false, actionDrawn: null, unavailableAction: true, cardName: card.val };
+        }
         return { busted: false, actionDrawn: card, cardName: card.val };
       }
       return { busted: false, actionDrawn: null };
@@ -333,6 +494,8 @@
         appendLog(room, `${player.name} drew a duplicate ${card.val} and BUSTED!`);
       } else if (result.flip7) {
         appendLog(room, `${player.name} completed FLIP 7 and secured ${player.roundScore} points!`);
+      } else if (result.unavailableAction) {
+        appendLog(room, `${player.name} drew FREEZE, but no active opponent could be targeted. The card stays in the hand and ${player.name} can draw again.`);
       } else if (result.actionDrawn) {
         appendLog(room, `${player.name} drew ${result.cardName}.`);
       } else {
@@ -460,6 +623,7 @@
           room.turnIndex = 0;
           room.winner = null;
           delete room.pendingAction;
+          delete room.lastDrawSequence;
           room.pendingActions = [];
           room.logs = ['Game started by Host! First to 200 points wins!'];
 
@@ -506,6 +670,7 @@
           room.playerOrder = playerIds;
           room.turnIndex = 0;
           delete room.pendingAction;
+          delete room.lastDrawSequence;
           room.pendingActions = [];
           playerIds.forEach(pid => {
             room.players[pid].currentHand = [];
@@ -536,6 +701,7 @@
           room.turnIndex = 0;
           room.winner = null;
           delete room.pendingAction;
+          delete room.lastDrawSequence;
           room.pendingActions = [];
           room.logs = ['A new game was started by the Host! First to 200 points wins!'];
           playerIds.forEach(pid => {
@@ -566,6 +732,11 @@
           const player = room.players[myPlayerId];
           const drawResult = processDrawnCardInMemory(room, myPlayerId, card);
           logDrawResult(room, player, card, drawResult);
+          room.lastDrawSequence = {
+            id: actionId,
+            createdAt: Date.now(),
+            events: [createDrawEvent(player, card, drawResult)]
+          };
 
           if (player.status === 'won') {
             room.state = 'game_over';
@@ -579,9 +750,13 @@
             room.pendingAction = {
               id: actionId,
               type: drawResult.cardName,
-              actorId: myPlayerId
+              actorId: myPlayerId,
+              createdAt: Date.now()
             };
             room.pendingActions = [];
+          } else if (drawResult.unavailableAction) {
+            // Keep turnIndex unchanged. The player remains the only active drawer
+            // and can press HIT again while retaining the Freeze card.
           } else {
             finishTurnInRoom(room);
           }
@@ -630,6 +805,9 @@
       const action = room.pendingAction;
       const modal = document.getElementById('action-modal');
 
+      // Let every player see the action card before asking its owner to choose.
+      if (revealInProgress) return;
+
       if (!action || action.actorId !== myPlayerId) {
         if (lastShownPendingActionId !== null) {
           modal.classList.add('hidden');
@@ -651,8 +829,11 @@
       const buttons = document.getElementById('modal-buttons');
       const actor = room.players[action.actorId];
 
-      title.textContent = 'Freeze Action Card';
-      desc.textContent = 'Choose an active opponent to freeze. Their current hand will be scored and locked.';
+      title.textContent = 'FREEZE: Choose an Opponent';
+      desc.textContent = 'Choose one active opponent. Their current hand will be scored immediately, and they will be unable to draw again this round.';
+      const actionCard = document.getElementById('action-modal-card');
+      actionCard.textContent = '❄️';
+      actionCard.style.background = '#db2777';
 
       const activeOpponents = (room.playerOrder || [])
         .filter(pid => pid !== action.actorId && room.players[pid] && room.players[pid].status === 'playing')
@@ -661,7 +842,7 @@
       if (activeOpponents.length === 0) {
         buttons.innerHTML = '';
         modal.classList.add('hidden');
-        resolvePendingActionNoTarget(action.id, 'No eligible opponent was available for Freeze.');
+        resolveFreezeWithoutTarget(action.id);
         return;
       }
 
@@ -678,8 +859,11 @@
       const buttons = document.getElementById('modal-buttons');
       const beneficiary = room.players[action.actorId];
 
-      title.textContent = 'Flip Three Action Card';
-      desc.textContent = `Choose who will draw three cards for ${beneficiary ? beneficiary.name : 'the player'}:`;
+      title.textContent = 'FLIP THREE: Choose Who Draws';
+      desc.textContent = 'Choose yourself or an active opponent. The selected player draws up to three cards in a row. If they bust or complete Flip 7, drawing stops. Any Freeze or Flip Three cards drawn during the sequence are handled after the sequence finishes.';
+      const actionCard = document.getElementById('action-modal-card');
+      actionCard.textContent = 'FLIP 3';
+      actionCard.style.background = '#db2777';
 
       const activeOpponents = (room.playerOrder || [])
         .filter(pid => pid !== action.actorId && room.players[pid] && room.players[pid].status === 'playing')
@@ -705,6 +889,23 @@
 
       buttons.innerHTML = html;
       modal.classList.remove('hidden');
+    }
+
+    async function resolveFreezeWithoutTarget(actionId) {
+      if (!roomRef) return;
+      try {
+        const result = await roomRef.transaction(room => {
+          const action = room && room.pendingAction;
+          if (!room || !action || action.id !== actionId || action.type !== 'FREEZE' || action.actorId !== myPlayerId) return;
+          delete room.pendingAction;
+          appendLog(room, "No active opponent was available for Freeze. The Freeze card remains in the player's hand, and the player keeps their turn.");
+          // Deliberately do not advance the turn: the same player may draw again.
+          return room;
+        });
+        if (result.committed && result.snapshot.val()) renderRoom(result.snapshot.val());
+      } catch (error) {
+        console.error('Could not resolve Freeze without a target:', error);
+      }
     }
 
     async function resolvePendingActionNoTarget(actionId, message) {
@@ -774,6 +975,8 @@
 
           delete room.pendingAction;
           const newlyQueuedActions = [];
+          const drawEvents = [];
+          const revealId = makeId('flip3');
           appendLog(room, `${room.players[action.actorId].name} used Flip Three on ${targetPlayer.name}.`);
 
           // Any Freeze or additional Flip Three cards drawn during this sequence are queued.
@@ -785,6 +988,7 @@
 
             const drawResult = processDrawnCardInMemory(room, actualTargetId, card);
             logDrawResult(room, targetPlayer, card, drawResult);
+            drawEvents.push(createDrawEvent(targetPlayer, card, drawResult));
 
             if (drawResult.actionDrawn) {
               newlyQueuedActions.push({
@@ -800,6 +1004,7 @@
               room.pendingActions = [];
               delete room.pendingAction;
               appendLog(room, `${targetPlayer.name} won the game by reaching 200 points!`);
+              room.lastDrawSequence = { id: revealId, createdAt: Date.now(), events: drawEvents };
               return room;
             }
 
@@ -808,6 +1013,9 @@
 
           const existingQueue = Array.isArray(room.pendingActions) ? room.pendingActions : [];
           room.pendingActions = existingQueue.concat(newlyQueuedActions);
+          if (drawEvents.length) {
+            room.lastDrawSequence = { id: revealId, createdAt: Date.now(), events: drawEvents };
+          }
           continueAfterPendingAction(room);
           return room;
         });
@@ -923,6 +1131,8 @@
     }
 
     function renderRoom(room) {
+      latestRoomData = room;
+      showDrawReveal(room);
       const isWaiting = room.state === 'waiting';
       const isRoundEnded = room.state === 'round_ended';
       const isGameOver = room.state === 'game_over';
@@ -976,14 +1186,16 @@
 
       const activePlayerId = order[room.turnIndex || 0];
       const activePlayer = players[activePlayerId];
-      const isMyTurn = !isRoundEnded && !isGameOver && !room.pendingAction &&
+      const isMyTurn = !isRoundEnded && !isGameOver && !room.pendingAction && !revealInProgress &&
         activePlayerId === myPlayerId && players[myPlayerId] && players[myPlayerId].status === 'playing';
 
       document.getElementById('turn-indicator').textContent = isGameOver
         ? 'GAME OVER'
         : (isRoundEnded ? 'ROUND CONCLUDED'
-          : (room.pendingAction ? 'ACTION CARD: RESOLUTION IN PROGRESS'
-            : (isMyTurn ? "IT'S YOUR TURN (Draw 1 Card)!" : `Current Turn: ${activePlayer ? activePlayer.name : '-'}`)));
+          : (revealInProgress ? 'REVEALING CARD…'
+            : (room.pendingAction
+              ? `${players[room.pendingAction.actorId] ? players[room.pendingAction.actorId].name : 'A player'} must resolve ${room.pendingAction.type === 'FLIP3' ? 'FLIP THREE' : 'FREEZE'}`
+              : (isMyTurn ? "IT'S YOUR TURN — DRAW OR STAY" : `Current Turn: ${activePlayer ? activePlayer.name : '-'}`))));
       document.getElementById('my-action-controls').classList.toggle('hidden', !isMyTurn);
 
       const grid = document.getElementById('game-players-grid');
