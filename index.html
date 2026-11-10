@@ -253,17 +253,43 @@
       room.discardPile = Array.isArray(room.discardPile) ? room.discardPile : [];
 
       if (card.type === 'number') {
-        const hasDuplicate = hand.some(existing => existing.type === 'number' && existing.val === card.val);
+        const hasDuplicate = hand.some(existing => existing.type === 'number' && String(existing.val) === String(card.val));
 
         if (hasDuplicate) {
           const secondChanceIndex = hand.findIndex(existing => existing.type === 'second-chance');
 
           if (secondChanceIndex !== -1) {
-            // The original number remains in the player's hand. The newly drawn duplicate
-            // and the consumed Second Chance are both removed from play and discarded.
-            const secondChanceCard = hand.splice(secondChanceIndex, 1)[0];
-            room.discardPile.push(secondChanceCard, card);
-            targetPlayer.currentHand = hand;
+            // Keep exactly one copy of the number that was already in the hand.
+            // Remove the Second Chance and any extra copies of that number from the
+            // hand. The newly drawn duplicate is never added to the hand: it goes
+            // directly to the discard pile together with the consumed shield.
+            const secondChanceCard = hand[secondChanceIndex];
+            const duplicateValue = String(card.val);
+            let keptOriginalNumber = false;
+            const cleanedHand = [];
+
+            hand.forEach((existing, index) => {
+              if (index === secondChanceIndex) return;
+
+              if (existing.type === 'number' && String(existing.val) === duplicateValue) {
+                if (!keptOriginalNumber) {
+                  cleanedHand.push(existing);
+                  keptOriginalNumber = true;
+                } else {
+                  // Also clean up duplicate copies that may have been left in the
+                  // hand by an earlier version of the game.
+                  room.discardPile.push(existing);
+                }
+                return;
+              }
+
+              cleanedHand.push(existing);
+            });
+
+            room.discardPile.push(secondChanceCard);
+            room.discardPile.push(card);
+            targetPlayer.currentHand = cleanedHand;
+            targetPlayer.roundScore = calculateHandScore(cleanedHand);
             return { busted: false, saved: true, actionDrawn: null };
           }
 
@@ -302,7 +328,7 @@
 
     function logDrawResult(room, player, card, result) {
       if (result.saved) {
-        appendLog(room, `${player.name} drew duplicate ${card.val} but was saved by SECOND CHANCE. The shield and newly drawn duplicate were discarded.`);
+        appendLog(room, `${player.name} drew duplicate ${card.val} but was saved by SECOND CHANCE. The original ${card.val} stayed in the hand; the newly drawn duplicate and shield were discarded.`);
       } else if (result.busted) {
         appendLog(room, `${player.name} drew a duplicate ${card.val} and BUSTED!`);
       } else if (result.flip7) {
