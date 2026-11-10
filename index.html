@@ -5,81 +5,179 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Flip 7 Online Multiplayer</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: #0f172a; color: #f8fafc; min-height: 100vh; padding: 16px; }
-    .container { max-width: 900px; margin: 0 auto; width: 100%; }
-    .card-box { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 24px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); }
-    h1 { color: #f59e0b; text-align: center; margin-bottom: 8px; font-size: 2rem; font-weight: 800; }
-    p.sub { text-align: center; color: #94a3b8; margin-bottom: 24px; font-size: 0.9rem; }
-    label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: #cbd5e1; font-weight: 600; text-transform: uppercase; }
-    input { width: 100%; padding: 12px; background: #0f172a; border: 1px solid #475569; border-radius: 8px; color: #fff; font-size: 1rem; margin-bottom: 16px; }
-    button { width: 100%; padding: 14px; background: #f59e0b; border: none; border-radius: 8px; color: #0f172a; font-weight: 700; font-size: 1rem; cursor: pointer; transition: all 0.2s; }
-    button:hover { background: #d97706; }
-    button:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; }
-    .btn-secondary { background: #334155; color: #fff; padding: 8px 16px; font-size: 0.85rem; width: auto; }
-    .btn-secondary:hover { background: #475569; }
-    .hidden { display: none !important; }
-    
-    /* Layout */
-    .game-header { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #334155; }
-    .players-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin: 16px 0; }
-    .player-card { background: #0f172a; border: 2px solid #334155; border-radius: 8px; padding: 14px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; }
-    .player-card.active-turn { border-color: #f59e0b; background: #1e1b4b; }
-    .player-card.busted { border-color: #ef4444; background: #450a0a; }
-    .player-card.stayed { border-color: #10b981; background: #064e3b; }
-    
-    /* Cards */
-    .cards-flex { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 10px; min-height: 80px; }
-    .game-card { width: 50px; height: 74px; background: #3b82f6; border: 2px solid #fff; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: 800; font-size: 1.1rem; color: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-    .game-card.modifier { background: #8b5cf6; font-size: 0.9rem; }
-    .game-card.second-chance { background: #10b981; font-size: 1rem; }
-    .game-card.action { background: #ec4899; font-size: 0.8rem; text-align: center; line-height: 1.1; }
-    
-    /* Scoreboard Table */
-    .scoreboard { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
-    .scoreboard table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
-    .scoreboard th, .scoreboard td { padding: 8px; border-bottom: 1px solid #1e293b; }
-    .scoreboard th { color: #f59e0b; }
+  :root {
+    --bg: #0e171d;
+    --surface: #17232b;
+    --surface-raised: #1d2b34;
+    --surface-deep: #101a20;
+    --border: #30434d;
+    --border-soft: rgba(173, 190, 194, .13);
+    --text: #edf1ee;
+    --muted: #9eadaa;
+    --accent: #d4b77a;
+    --accent-deep: #ac8f59;
+    --success: #68b39a;
+    --danger: #cb7773;
+    --number: #315f73;
+    --modifier: #625b80;
+    --shield: #2f705d;
+    --action: #8d5069;
+  }
 
-    /* Modal Overlay for Action Cards */
-    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-    .modal-content { background: #1e293b; border: 2px solid #f59e0b; border-radius: 12px; padding: 24px; max-width: 400px; width: 90%; text-align: center; }
-    .modal-buttons { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  body {
+    min-height: 100vh; padding: 18px; color: var(--text);
+    background: radial-gradient(ellipse at 50% -20%, #21333b 0%, var(--bg) 58%);
+  }
+  .container { max-width: 980px; width: 100%; margin: 0 auto; }
+  .card-box {
+    padding: 24px; border-radius: 16px; border: 1px solid var(--border);
+    background: linear-gradient(155deg, rgba(29,43,52,.98), rgba(20,32,40,.98));
+    box-shadow: 0 18px 48px rgba(0,0,0,.22);
+  }
+  h1 { color: var(--accent) !important; text-align: center; margin-bottom: 8px; font-size: 2rem; font-weight: 800; letter-spacing: .12em; }
+  p.sub { color: var(--muted); text-align: center; margin-bottom: 26px; font-size: .9rem; }
+  label { display: block; margin-bottom: 7px; color: #c3ceca; font-size: .76rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  input {
+    width: 100%; padding: 13px 14px; margin-bottom: 17px; color: var(--text); font-size: 1rem;
+    border: 1px solid var(--border); border-radius: 9px; background: var(--surface-deep); outline: none;
+  }
+  input:focus { border-color: var(--accent-deep); box-shadow: 0 0 0 3px rgba(212,183,122,.12); }
+  button {
+    width: 100%; padding: 13px 16px; color: #172027; font-size: .92rem; font-weight: 750;
+    letter-spacing: .035em; border: 1px solid transparent; border-radius: 9px; cursor: pointer;
+    background: var(--accent); transition: transform .16s ease, background .16s ease, border-color .16s ease;
+  }
+  button:hover { background: #e1c68f; transform: translateY(-1px); }
+  button:disabled { background: #3c4a51; color: #91a09f; cursor: not-allowed; transform: none; }
+  .btn-secondary { width: auto; padding: 9px 14px; color: var(--text); font-size: .82rem; background: #2a3b44; border-color: #40535c; }
+  .btn-secondary:hover { background: #354953; }
+  .hidden { display: none !important; }
 
-    .action-controls { display: flex; gap: 12px; margin-top: 20px; }
-    .action-controls button { flex: 1; }
-    .log-box { background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.8rem; color: #94a3b8; max-height: 150px; overflow-y: auto; margin-top: 16px; line-height: 1.55; }
-    .log-box div { padding: 3px 0; border-bottom: 1px solid rgba(148,163,184,0.08); }
-    .player-card { transition: border-color .2s ease, background .2s ease, transform .2s ease; }
-    .player-card.active-turn { box-shadow: 0 0 0 2px rgba(245,158,11,.12); }
-    .game-card { animation: card-arrive .28s ease-out both; }
-    @keyframes card-arrive { from { opacity: 0; transform: translateY(9px) scale(.92); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  .game-header {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    padding: 13px 16px; margin-bottom: 18px; border: 1px solid var(--border);
+    border-radius: 11px; background: rgba(13,23,29,.62);
+  }
+  .game-header span { color: var(--muted) !important; }
+  .game-header strong { color: var(--accent) !important; }
+  .players-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(225px, 1fr)); gap: 13px; margin: 17px 0; }
+  .player-card {
+    position: relative; min-width: 0; padding: 15px; overflow: visible; text-align: center;
+    display: flex; flex-direction: column; justify-content: space-between; gap: 8px;
+    border: 1px solid var(--border); border-radius: 12px; background: var(--surface-deep);
+    transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
+  }
+  .player-card.active-turn {
+    border-color: var(--accent); background: linear-gradient(160deg, rgba(59,57,46,.38), var(--surface-deep) 75%);
+    box-shadow: 0 0 0 1px rgba(212,183,122,.15), 0 8px 26px rgba(0,0,0,.15);
+  }
+  .player-card.busted { border-color: rgba(203,119,115,.7); background: rgba(91,43,44,.2); }
+  .player-card.stayed { border-color: rgba(104,179,154,.65); background: rgba(38,91,73,.18); }
+  .player-card > div:first-child > div:first-child { color: var(--accent) !important; }
+  .player-card > div:first-child > div:nth-child(2) { color: var(--muted) !important; letter-spacing: .045em; }
 
-    /* Shared card reveal: every player sees what was drawn before the next action begins. */
-    .draw-reveal-content { max-width: 360px; padding: 26px; }
-    .reveal-kicker { color: #94a3b8; font-size: .75rem; font-weight: 800; letter-spacing: .12em; margin-bottom: 14px; text-transform: uppercase; }
-    .revealed-card { width: 112px; height: 158px; border: 3px solid #fff; border-radius: 14px; margin: 0 auto 18px; display: flex; align-items: center; justify-content: center; box-shadow: 0 12px 28px rgba(0,0,0,.38); font-size: 2rem; font-weight: 900; animation: reveal-pop .32s cubic-bezier(.2,.8,.2,1) both; }
-    .revealed-card.number { background: #2563eb; }
-    .revealed-card.modifier { background: #7c3aed; font-size: 1.65rem; }
-    .revealed-card.second-chance { background: #059669; font-size: 2.4rem; }
-    .revealed-card.action { background: #db2777; font-size: 1.15rem; text-align: center; padding: 10px; line-height: 1.2; }
-    #draw-reveal-title { color: #f8fafc; font-size: 1.12rem; margin-bottom: 8px; }
-    #draw-reveal-desc { color: #cbd5e1; font-size: .9rem; line-height: 1.45; min-height: 42px; }
-    .reveal-progress { height: 4px; background: #334155; border-radius: 99px; overflow: hidden; margin-top: 18px; }
-    .reveal-progress-fill { height: 100%; width: 0; background: #f59e0b; }
-    @keyframes reveal-pop { from { opacity: 0; transform: translateY(12px) rotate(-4deg) scale(.85); } to { opacity: 1; transform: translateY(0) rotate(0) scale(1); } }
-    .action-modal-card { display: inline-flex; align-items: center; justify-content: center; width: 58px; height: 76px; border: 2px solid #fff; border-radius: 9px; background: #db2777; font-size: 1.15rem; font-weight: 900; margin: 0 auto 12px; }
-    .modal-content h3 { line-height: 1.25; }
-    .modal-content .modal-buttons button { min-height: 46px; }
-    @media (max-width: 600px) {
-      body { padding: 8px; }
-      .card-box { padding: 16px; }
-      .action-controls { flex-direction: column; }
-      .players-grid { grid-template-columns: 1fr; }
-      .scoreboard table { font-size: .8rem; }
-      .scoreboard th, .scoreboard td { padding: 7px 5px; }
-    }
-  </style>
+  .cards-flex { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 7px; min-height: 84px; margin-top: 7px; }
+  .game-card {
+    position: relative; width: 52px; height: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    flex: 0 0 auto; border: 1px solid rgba(238,244,239,.72); border-radius: 8px;
+    color: #fff; font-size: 1.12rem; font-weight: 850; line-height: 1.05;
+    box-shadow: 0 5px 12px rgba(0,0,0,.2); animation: card-arrive .24s ease-out both;
+  }
+  .game-card.number { background: linear-gradient(150deg, #3e7185, var(--number)); }
+  .game-card.modifier { background: linear-gradient(150deg, #77709a, var(--modifier)); font-size: .88rem; }
+  .game-card.second-chance {
+    width: 68px; padding: 5px 3px; gap: 4px; background: linear-gradient(150deg, #418b73, var(--shield));
+    border-color: rgba(201,239,220,.82); text-align: center;
+  }
+  .sc-icon { font-size: 1.12rem; line-height: 1; }
+  .sc-label { font-size: .53rem; font-weight: 900; letter-spacing: .045em; line-height: 1.12; }
+  .game-card.action { background: linear-gradient(150deg, #a36680, var(--action)); font-size: .69rem; text-align: center; line-height: 1.1; padding: 4px; }
+  .game-card.newly-drawn {
+    z-index: 2; transform: translateY(-7px); border: 2px solid var(--accent);
+    animation: card-highlight .28s ease-out both;
+    box-shadow: 0 0 0 3px rgba(212,183,122,.2), 0 9px 22px rgba(0,0,0,.36), 0 0 18px rgba(212,183,122,.22);
+  }
+  @keyframes card-highlight { from { opacity: .82; transform: translateY(5px) scale(.95); } to { opacity: 1; transform: translateY(-7px) scale(1); } }
+  .game-card.newly-drawn::after {
+    content: "NEW"; position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+    padding: 2px 5px; border-radius: 4px; color: #172027; background: var(--accent);
+    font-size: .48rem; line-height: 1.15; font-weight: 900; letter-spacing: .08em;
+  }
+  @keyframes card-arrive { from { opacity: 0; transform: translateY(7px) scale(.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+  .scoreboard { padding: 14px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 12px; background: rgba(13,23,29,.68); }
+  .scoreboard h3 { color: #d6dfda !important; font-size: .82rem !important; letter-spacing: .075em; }
+  .scoreboard table { width: 100%; border-collapse: collapse; text-align: left; font-size: .88rem; }
+  .scoreboard th, .scoreboard td { padding: 9px 8px; border-bottom: 1px solid var(--border-soft); }
+  .scoreboard th { color: var(--accent) !important; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; }
+  .scoreboard td { color: #dce4df; }
+  .scoreboard tr:last-child td { border-bottom: 0; }
+
+  #turn-indicator { color: var(--accent) !important; font-size: 1.12rem !important; letter-spacing: .025em; }
+  #my-action-controls { gap: 10px; }
+  #my-action-controls button:first-child { color: #10231f !important; background: #73b59c !important; }
+  #my-action-controls button:first-child:hover { background: #8bc9af !important; }
+  #my-action-controls .btn-secondary { color: var(--text) !important; background: #2b3d46 !important; }
+
+  .activity-panel { margin-top: 18px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: rgba(13,23,29,.72); }
+  .activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 15px; border-bottom: 1px solid var(--border); background: rgba(31,46,55,.66); }
+  .activity-heading h3 { color: #e5ebe6; font-size: .78rem; font-weight: 800; letter-spacing: .1em; }
+  .activity-heading p { margin-top: 3px; color: var(--muted); font-size: .72rem; }
+  .activity-live { display: inline-flex; align-items: center; gap: 6px; color: var(--success); font-size: .65rem; font-weight: 800; letter-spacing: .08em; white-space: nowrap; }
+  .activity-live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 8px rgba(104,179,154,.55); }
+  .log-box { max-height: 190px; overflow-y: auto; padding: 6px 14px; color: #c4cfca; font-family: inherit; font-size: .78rem; line-height: 1.45; }
+  .activity-entry { display: grid; grid-template-columns: 7px 76px minmax(0,1fr); align-items: baseline; gap: 9px; padding: 8px 1px; border-bottom: 1px solid var(--border-soft); }
+  .activity-entry:last-child { border-bottom: 0; }
+  .activity-dot { width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: #7f9298; }
+  .activity-time { color: #84959a; font-size: .68rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .activity-message { color: #d0d9d4; overflow-wrap: anywhere; }
+  .activity-entry.draw .activity-dot { background: #72a9bd; }
+  .activity-entry.action .activity-dot { background: #c58aa4; }
+  .activity-entry.success .activity-dot { background: var(--success); }
+  .activity-entry.warning .activity-dot { background: var(--danger); }
+  .activity-empty { padding: 13px 1px; color: var(--muted); }
+
+  /* Only action-card draws use this short shared reveal. */
+  .modal-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(5,12,16,.82); backdrop-filter: blur(5px); }
+  .modal-content { width: 90%; max-width: 410px; padding: 24px; text-align: center; border: 1px solid #796a4d; border-radius: 16px; background: linear-gradient(155deg, #24333a, #17232b); box-shadow: 0 22px 60px rgba(0,0,0,.5); }
+  .modal-buttons { display: flex; flex-direction: column; gap: 9px; margin-top: 18px; }
+  .draw-reveal-content { max-width: 350px; padding: 24px; }
+  .reveal-kicker { margin-bottom: 14px; color: var(--accent); font-size: .68rem; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
+  .revealed-card { width: 108px; height: 150px; display: flex; align-items: center; justify-content: center; margin: 0 auto 17px; border: 2px solid rgba(255,255,255,.85); border-radius: 13px; box-shadow: 0 12px 28px rgba(0,0,0,.38); font-size: 2rem; font-weight: 900; animation: reveal-pop .3s cubic-bezier(.2,.8,.2,1) both; }
+  .revealed-card.number { background: var(--number); }
+  .revealed-card.modifier { background: var(--modifier); font-size: 1.55rem; }
+  .revealed-card.second-chance { background: var(--shield); font-size: 1.05rem; }
+  .revealed-card.action { background: var(--action); font-size: 1.1rem; text-align: center; padding: 10px; line-height: 1.2; }
+  #draw-reveal-title { margin-bottom: 8px; color: var(--text); font-size: 1.08rem; }
+  #draw-reveal-desc { min-height: 40px; color: #bdc9c4; font-size: .87rem; line-height: 1.45; }
+  .reveal-progress { height: 3px; margin-top: 18px; overflow: hidden; border-radius: 99px; background: #3c4c52; }
+  .reveal-progress-fill { height: 100%; width: 0; background: var(--accent); }
+  @keyframes reveal-pop { from { opacity: 0; transform: translateY(10px) rotate(-3deg) scale(.88); } to { opacity: 1; transform: translateY(0) rotate(0) scale(1); } }
+  .action-modal-card { width: 62px; height: 78px; display: inline-flex; align-items: center; justify-content: center; margin: 0 auto 12px; border: 1px solid rgba(255,255,255,.85); border-radius: 10px; background: var(--action) !important; color: #fff; font-size: 1.05rem; font-weight: 900; }
+  .modal-content h3 { line-height: 1.25; color: var(--accent) !important; }
+  .modal-content p { color: #bdc9c4 !important; }
+  .modal-content .modal-buttons button { min-height: 45px; color: #172027 !important; background: var(--accent) !important; }
+  .modal-content .modal-buttons button:hover { background: #e1c68f !important; }
+  #round-end-panel { background: var(--surface-deep) !important; border: 1px solid var(--accent-deep) !important; }
+  #round-end-title { color: var(--accent) !important; }
+  #round-end-msg, #guest-next-round-msg { color: var(--muted) !important; }
+  #next-round-btn { color: #172027 !important; background: var(--success) !important; }
+
+  @media (max-width: 620px) {
+    body { padding: 8px; }
+    .card-box { padding: 15px; border-radius: 13px; }
+    .game-header { align-items: flex-start; }
+    .players-grid { grid-template-columns: 1fr; }
+    .action-controls { flex-direction: column; }
+    .scoreboard { padding: 9px; }
+    .scoreboard table { font-size: .78rem; }
+    .scoreboard th, .scoreboard td { padding: 8px 5px; }
+    .activity-entry { grid-template-columns: 7px 68px minmax(0,1fr); gap: 7px; }
+    .activity-time { font-size: .64rem; }
+    .btn-secondary { padding: 8px 10px; }
+  }
+</style>
 
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
@@ -159,7 +257,16 @@
           <button onclick="stayTurn()" class="btn-secondary">STAY (LOCK POINTS)</button>
         </div>
 
-        <div id="game-logs" class="log-box"></div>
+        <section class="activity-panel" aria-label="Live table activity">
+          <div class="activity-heading">
+            <div>
+              <h3>TABLE ACTIVITY</h3>
+              <p>Recent draws, card effects and round events</p>
+            </div>
+            <span class="activity-live">LIVE</span>
+          </div>
+          <div id="game-logs" class="log-box" role="log" aria-live="polite" aria-relevant="additions text"></div>
+        </section>
       </div>
     </div>
   </div>
@@ -287,7 +394,7 @@
       return String(card.display || card.val || card.type);
     }
 
-    function createDrawEvent(player, card, result) {
+    function createDrawEvent(player, card, result, playerId) {
       const label = cardLabel(card);
       let title = `${player.name} drew ${label}`;
       let detail = `The ${label} card was added to ${player.name}'s hand.`;
@@ -317,10 +424,12 @@
       }
 
       return {
+        playerId: playerId || null,
         playerName: player.name,
         cardType: card.type,
         cardValue: card.type === 'action' ? (card.val === 'FLIP3' ? 'FLIP 3' : 'FREEZE') :
           (card.type === 'second-chance' ? '🛡️' : label),
+        highlightOnTable: card.type === 'number' && !result.saved,
         title,
         detail
       };
@@ -331,13 +440,18 @@
       if (!sequence || !sequence.id || !Array.isArray(sequence.events) || sequence.events.length === 0) return;
       if (sequence.id === lastShownRevealId) return;
 
-      // Ignore old announcements when a player joins or refreshes much later.
+      // Ignore old announcements when a player reconnects or refreshes much later.
       if (sequence.createdAt && Date.now() - sequence.createdAt > 20000) {
         lastShownRevealId = sequence.id;
         return;
       }
 
       lastShownRevealId = sequence.id;
+      // Number, modifier and Second Chance cards appear directly in the player's
+      // hand. Only action cards use the shared, screen-centred reveal.
+      const events = sequence.events.filter(event => event.cardType === 'action');
+      if (events.length === 0) return;
+
       revealInProgress = true;
       if (revealTimeout) clearTimeout(revealTimeout);
       document.getElementById('action-modal').classList.add('hidden');
@@ -347,27 +461,24 @@
       const title = document.getElementById('draw-reveal-title');
       const desc = document.getElementById('draw-reveal-desc');
       const progress = document.getElementById('reveal-progress-fill');
-      const events = sequence.events;
       let index = 0;
       modal.classList.remove('hidden');
 
       const showStep = () => {
         const event = events[index];
-        cardEl.className = `revealed-card ${event.cardType || 'number'}`;
-        cardEl.textContent = event.cardValue || '?';
+        cardEl.className = `revealed-card action`;
+        cardEl.textContent = event.cardValue || 'ACTION';
         kicker.textContent = events.length > 1
-          ? `FLIP THREE · CARD ${index + 1} OF ${events.length}`
-          : `CARD DRAWN · ${event.playerName || 'PLAYER'}`;
-        title.textContent = event.title || 'Card drawn';
+          ? `ACTION CARD · ${index + 1} OF ${events.length}`
+          : `ACTION CARD · ${event.playerName || 'PLAYER'}`;
+        title.textContent = event.title || 'Action card drawn';
         desc.textContent = event.detail || '';
         progress.style.transition = 'none';
         progress.style.width = '0%';
-        // Force layout so each reveal gets a fresh progress animation.
         void progress.offsetWidth;
-        progress.style.transition = 'width 0.95s linear';
+        progress.style.transition = 'width 1.5s linear';
         progress.style.width = '100%';
 
-        const delay = events.length > 1 ? 1050 : (event.cardType === 'action' ? 1550 : 1250);
         revealTimeout = setTimeout(() => {
           index += 1;
           if (index < events.length) {
@@ -377,7 +488,7 @@
             revealInProgress = false;
             if (latestRoomData) renderRoom(latestRoomData);
           }
-        }, delay);
+        }, 1500);
       };
       showStep();
     }
@@ -499,7 +610,7 @@
       } else if (result.actionDrawn) {
         appendLog(room, `${player.name} drew ${result.cardName}.`);
       } else {
-        appendLog(room, `${player.name} drew ${card.val !== undefined ? card.val : (card.display || card.type)}.`);
+        appendLog(room, `${player.name} drew ${cardLabel(card)}.`);
       }
     }
 
@@ -556,9 +667,19 @@
 
         let roomWasAlreadyStarted = false;
         const joinResult = await roomRef.transaction(room => {
-          if (room === null) {
+          // Recycle an abandoned room when no player records remain.
+          // This also handles rooms whose last player disconnected during a game:
+          // onDisconnect removes that player, and the next join starts a clean lobby
+          // using the same room code instead of being blocked by the old game state.
+          const existingPlayerIds = room && room.players
+            ? Object.keys(room.players)
+            : [];
+          if (!room || existingPlayerIds.length === 0) {
             room = { host: myPlayerId, state: 'waiting', players: {} };
           }
+
+          // A room is only considered occupied when at least one player record remains.
+          // Never overwrite an active lobby or an in-progress game.
           if (room.state !== 'waiting') {
             roomWasAlreadyStarted = true;
             return;
@@ -735,7 +856,7 @@
           room.lastDrawSequence = {
             id: actionId,
             createdAt: Date.now(),
-            events: [createDrawEvent(player, card, drawResult)]
+            events: [createDrawEvent(player, card, drawResult, myPlayerId)]
           };
 
           if (player.status === 'won') {
@@ -988,7 +1109,7 @@
 
             const drawResult = processDrawnCardInMemory(room, actualTargetId, card);
             logDrawResult(room, targetPlayer, card, drawResult);
-            drawEvents.push(createDrawEvent(targetPlayer, card, drawResult));
+            drawEvents.push(createDrawEvent(targetPlayer, card, drawResult, actualTargetId));
 
             if (drawResult.actionDrawn) {
               newlyQueuedActions.push({
@@ -1130,6 +1251,33 @@
       return [...numbers, ...others];
     }
 
+    function getHighlightedHandIndexes(room, playerId, hand) {
+      const needed = new Map();
+      const events = room && room.lastDrawSequence && Array.isArray(room.lastDrawSequence.events)
+        ? room.lastDrawSequence.events : [];
+
+      events.forEach(event => {
+        if (event.playerId !== playerId || event.cardType !== 'number' || !event.highlightOnTable) return;
+        const value = String(event.cardValue);
+        needed.set(value, (needed.get(value) || 0) + 1);
+      });
+
+      const highlighted = new Set();
+      // Walk from the end so that, in the rare bust case, only the newly drawn
+      // duplicate is highlighted rather than the original matching card.
+      for (let index = (hand || []).length - 1; index >= 0; index--) {
+        const card = hand[index];
+        if (!card || card.type !== 'number') continue;
+        const value = String(card.val);
+        const count = needed.get(value) || 0;
+        if (count > 0) {
+          highlighted.add(index);
+          needed.set(value, count - 1);
+        }
+      }
+      return highlighted;
+    }
+
     function renderRoom(room) {
       latestRoomData = room;
       showDrawReveal(room);
@@ -1203,6 +1351,7 @@
         const player = players[pid];
         if (!player) return '';
         const sortedHand = sortHand(player.currentHand || []);
+        const highlightedIndexes = getHighlightedHandIndexes(room, pid, sortedHand);
         const isActive = !isRoundEnded && !isGameOver && pid === activePlayerId;
         const statusClass = player.status === 'busted' ? 'busted' : (player.status === 'stayed' ? 'stayed' : '');
 
@@ -1213,11 +1362,16 @@
               <div style="font-size:0.75rem;color:#cbd5e1;margin-top:2px;">STATUS: ${escapeHtml(String(player.status || '').toUpperCase())}</div>
             </div>
             <div class="cards-flex">
-              ${sortedHand.map(card => `
-                <div class="game-card ${escapeHtml(card.type)}">
-                  ${escapeHtml(card.type === 'number' ? card.val : (card.type === 'modifier' ? card.val : (card.type === 'second-chance' ? '🛡️' : (card.display || card.val))))}
-                </div>
-              `).join('')}
+              ${sortedHand.map((card, cardIndex) => {
+                const isNew = highlightedIndexes.has(cardIndex);
+                let face = '';
+                if (card.type === 'second-chance') {
+                  face = '<span class="sc-icon">🛡️</span><span class="sc-label">SECOND<br>CHANCE</span>';
+                } else {
+                  face = escapeHtml(card.type === 'number' ? card.val : (card.type === 'modifier' ? card.val : (card.display || card.val)));
+                }
+                return `<div class="game-card ${escapeHtml(card.type)} ${isNew ? 'newly-drawn' : ''}">${face}</div>`;
+              }).join('')}
             </div>
             <div style="font-size:0.8rem;color:#94a3b8;margin-top:8px;">Round Pts: <strong>${player.roundScore || 0}</strong></div>
           </div>
@@ -1225,7 +1379,18 @@
       }).join('');
 
       const logsBox = document.getElementById('game-logs');
-      logsBox.innerHTML = (room.logs || []).map(log => `<div>${escapeHtml(log)}</div>`).join('');
+      const logs = Array.isArray(room.logs) ? room.logs : [];
+      logsBox.innerHTML = logs.length ? logs.map(log => {
+        const raw = String(log);
+        const match = raw.match(/^\[([^\]]+)\]\s*(.*)$/);
+        const time = match ? match[1] : '';
+        const message = match ? match[2] : raw;
+        let tone = 'draw';
+        if (/BUSTED|bust/i.test(message)) tone = 'warning';
+        else if (/SECOND CHANCE|saved|secured|won the game|STAYED|stayed/i.test(message)) tone = 'success';
+        else if (/FREEZE|frozen|FLIP THREE|FLIP 3|action/i.test(message)) tone = 'action';
+        return `<div class="activity-entry ${tone}"><span class="activity-dot"></span><span class="activity-time">${escapeHtml(time)}</span><span class="activity-message">${escapeHtml(message)}</span></div>`;
+      }).join('') : '<div class="activity-empty">No activity yet. Card draws and actions will appear here.</div>';
       showPendingAction(room);
     }
 
