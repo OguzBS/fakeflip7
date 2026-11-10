@@ -72,10 +72,23 @@
     border-color: var(--accent); background: linear-gradient(160deg, rgba(59,57,46,.38), var(--surface-deep) 75%);
     box-shadow: 0 0 0 1px rgba(212,183,122,.15), 0 8px 26px rgba(0,0,0,.15);
   }
-  .player-card.busted { border-color: rgba(203,119,115,.7); background: rgba(91,43,44,.2); }
+  .player-card.busted {
+    border: 2px solid #e27670;
+    background: linear-gradient(145deg, rgba(119,48,49,.46), rgba(48,27,31,.94) 72%);
+    box-shadow: 0 0 0 1px rgba(226,118,112,.22), 0 0 22px rgba(197,76,75,.22), inset 0 0 24px rgba(197,76,75,.09);
+  }
+  .player-card.busted::before {
+    content: "BUSTED"; position: absolute; top: 9px; left: 50%; transform: translateX(-50%);
+    padding: 4px 10px; border: 1px solid rgba(255,220,216,.36); border-radius: 5px;
+    color: #fff2ef; background: #9f4547; font-size: .64rem; font-weight: 950;
+    letter-spacing: .16em; line-height: 1.1; box-shadow: 0 2px 10px rgba(0,0,0,.24);
+  }
+  .player-card.busted > div:first-child { padding-top: 21px; }
   .player-card.stayed { border-color: rgba(104,179,154,.65); background: rgba(38,91,73,.18); }
   .player-card > div:first-child > div:first-child { color: var(--accent) !important; }
   .player-card > div:first-child > div:nth-child(2) { color: var(--muted) !important; letter-spacing: .045em; }
+  .player-card.busted > div:first-child > div:first-child { color: #ffd0cb !important; }
+  .player-card.busted > div:first-child > div:nth-child(2) { color: #f2a6a0 !important; font-weight: 850; letter-spacing: .1em; }
 
   .cards-flex { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 7px; min-height: 84px; margin-top: 7px; }
   .game-card {
@@ -115,10 +128,18 @@
   .scoreboard tr:last-child td { border-bottom: 0; }
 
   #turn-indicator { color: var(--accent) !important; font-size: 1.12rem !important; letter-spacing: .025em; }
-  #my-action-controls { gap: 10px; }
+  #my-action-controls {
+    display: flex; flex-direction: row; align-items: stretch; gap: 10px; width: 100%; margin-top: 16px;
+  }
+  #my-action-controls button {
+    display: flex; flex: 1 1 0; align-items: center; justify-content: center;
+    width: 0; min-width: 0; min-height: 54px; padding: 12px 10px;
+    font-size: .84rem; line-height: 1.25; text-align: center; white-space: normal;
+  }
   #my-action-controls button:first-child { color: #10231f !important; background: #73b59c !important; }
   #my-action-controls button:first-child:hover { background: #8bc9af !important; }
   #my-action-controls .btn-secondary { color: var(--text) !important; background: #2b3d46 !important; }
+  #my-action-controls .btn-secondary:hover { background: #354953 !important; }
 
   .activity-panel { margin-top: 18px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: rgba(13,23,29,.72); }
   .activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 15px; border-bottom: 1px solid var(--border); background: rgba(31,46,55,.66); }
@@ -169,7 +190,8 @@
     .card-box { padding: 15px; border-radius: 13px; }
     .game-header { align-items: flex-start; }
     .players-grid { grid-template-columns: 1fr; }
-    .action-controls { flex-direction: column; }
+    #my-action-controls { flex-direction: row; gap: 8px; }
+    #my-action-controls button { min-height: 54px; padding: 10px 7px; font-size: .76rem; }
     .scoreboard { padding: 9px; }
     .scoreboard table { font-size: .78rem; }
     .scoreboard th, .scoreboard td { padding: 8px 5px; }
@@ -254,7 +276,7 @@
 
         <div id="my-action-controls" class="action-controls hidden">
           <button onclick="hitCard()" style="background:#10b981; color:#fff;">HIT (DRAW 1 CARD)</button>
-          <button onclick="stayTurn()" class="btn-secondary">STAY (LOCK POINTS)</button>
+          <button onclick="stayTurn()" class="btn-secondary">STAY (KEEP POINTS)</button>
         </div>
 
         <section class="activity-panel" aria-label="Live table activity">
@@ -429,7 +451,7 @@
         cardType: card.type,
         cardValue: card.type === 'action' ? (card.val === 'FLIP3' ? 'FLIP 3' : 'FREEZE') :
           (card.type === 'second-chance' ? '🛡️' : label),
-        highlightOnTable: card.type === 'number' && !result.saved,
+        highlightOnTable: (card.type === 'number' || card.type === 'modifier') && !result.saved,
         title,
         detail
       };
@@ -1257,9 +1279,9 @@
         ? room.lastDrawSequence.events : [];
 
       events.forEach(event => {
-        if (event.playerId !== playerId || event.cardType !== 'number' || !event.highlightOnTable) return;
-        const value = String(event.cardValue);
-        needed.set(value, (needed.get(value) || 0) + 1);
+        if (event.playerId !== playerId || !['number', 'modifier'].includes(event.cardType) || !event.highlightOnTable) return;
+        const key = `${event.cardType}:${String(event.cardValue)}`;
+        needed.set(key, (needed.get(key) || 0) + 1);
       });
 
       const highlighted = new Set();
@@ -1267,12 +1289,12 @@
       // duplicate is highlighted rather than the original matching card.
       for (let index = (hand || []).length - 1; index >= 0; index--) {
         const card = hand[index];
-        if (!card || card.type !== 'number') continue;
-        const value = String(card.val);
-        const count = needed.get(value) || 0;
+        if (!card || !['number', 'modifier'].includes(card.type)) continue;
+        const key = `${card.type}:${String(card.val)}`;
+        const count = needed.get(key) || 0;
         if (count > 0) {
           highlighted.add(index);
-          needed.set(value, count - 1);
+          needed.set(key, count - 1);
         }
       }
       return highlighted;
